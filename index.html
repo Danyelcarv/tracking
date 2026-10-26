@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tracking ADS-B – TrafegoAereo</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; }
+#map { height: 100%; }
+#info-bar {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+  z-index: 1000; background: rgba(0,0,0,.75); color: #fff;
+  padding: 8px 20px; border-radius: 8px; font-size: 14px;
+  display: flex; gap: 20px; align-items: center;
+  backdrop-filter: blur(4px);
+}
+#info-bar .badge { color: #f2c94c; font-weight: bold; }
+.legend {
+  position: absolute; bottom: 30px; right: 10px;
+  z-index: 1000; background: rgba(0,0,0,.7); color: #fff;
+  padding: 10px 14px; border-radius: 8px; font-size: 13px;
+  backdrop-filter: blur(4px);
+}
+.legend div { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+.legend .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+#footer {
+  position: absolute; bottom: 0; left: 0; right: 0; z-index: 1000;
+  background: rgba(0,0,0,.65); color: #bbb; text-align: center;
+  padding: 4px 10px; font-size: 11px; backdrop-filter: blur(4px);
+}
+#footer a { color: #8ab4f8; text-decoration: none; }
+#footer a:hover { text-decoration: underline; }
+.leaflet-popup-content { font-size: 13px; line-height: 1.5; min-width: 200px; }
+.leaflet-popup-content strong { color: #1a1a2e; }
+.plane-label {
+  background: rgba(0,0,0,.65); color: #fff;
+  font-size: 10px; font-weight: 600; padding: 1px 5px;
+  border-radius: 3px; white-space: nowrap;
+  text-shadow: 0 0 2px #000;
+  pointer-events: none;
+}
+.plane-label.stale {
+  background: rgba(80,80,80,.75);
+  font-style: italic;
+  font-size: 9px;
+}
+.plane-marker-stale { opacity: .45; }
+#seguir-bar {
+  position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
+  z-index: 1000; background: rgba(0,0,0,.75); color: #4fc3f7;
+  padding: 4px 14px; border-radius: 20px; font-size: 13px;
+  display: none; align-items: center; gap: 10px;
+  backdrop-filter: blur(4px); border: 1px solid #4fc3f7;
+  pointer-events: auto;
+}
+#seguir-bar button {
+  background: none; border: none; color: #fff; cursor: pointer;
+  font-size: 16px; line-height: 1; padding: 0 2px;
+}
+</style>
+</head>
+<body>
+
+<div id="info-bar">
+  <span>🛰️ <span class="badge" id="total">0</span> aeronaves</span>
+  <span>📍 <span class="badge" id="com-posicao">0</span> com posição</span>
+  <span>🔄 <span class="badge" id="ultima-atualizacao">—</span></span>
+</div>
+
+<div id="map"></div>
+
+<div id="footer">Dados: <a href="https://trafegoaereo.com.br" target="_blank" rel="noopener">trafegoaereo.com.br</a> via <a href="https://github.com/wiedehopf/tar1090" target="_blank" rel="noopener">tar1090</a> / <a href="https://github.com/adsbxchange/readsb" target="_blank" rel="noopener">readsb</a> · <a href="radar3d.html">🌐 Ver em 3D</a></div>
+
+<div id="seguir-bar">🛰 <span id="seguir-callsign"></span> <button id="seguir-cancelar" title="Parar de seguir">✕</button></div>
+
+<div class="legend">
+  <div><span class="dot" style="background:#e74c3c;"></span> Solo</div>
+  <div><span class="dot" style="background:#f39c12;"></span> 0–10.000 pés</div>
+  <div><span class="dot" style="background:#3498db;"></span> 10k–30.000 pés</div>
+  <div><span class="dot" style="background:#2ecc71;"></span> > 30.000 pés</div>
+  <div><span class="dot" style="background:#9b59b6;"></span> MLAT / posição estimada</div>
+  <div><span class="dot" style="background:#666;opacity:.5;"></span> Cache (última posição)</div>
+  <div style="border-top:1px solid #555;margin-top:6px;padding-top:6px;font-size:11px;display:flex;flex-wrap:wrap;gap:4px;">
+    <span style="display:flex;align-items:center;gap:2px;"><svg viewBox="0 0 24 24" width="12" height="12"><path d="M21 16v-2l-8-5V3.5A1.5 1.5 0 0 0 11.5 2 1.5 1.5 0 0 0 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z" fill="#ccc"/></svg>Av</span>
+    <span style="display:flex;align-items:center;gap:2px;"><svg viewBox="0 0 24 24" width="12" height="12"><path d="M12 2C9 8 4 11 3 15l4-1 5-3 5 3 4 1c-1-4-6-7-9-13zM12 11v8l-2 2v1l2-1 2 1v-1l-2-2v-8z" fill="#ccc"/></svg>Jt</span>
+    <span style="display:flex;align-items:center;gap:2px;"><svg viewBox="0 0 24 24" width="12" height="12"><path d="M7 13c0-4 2-5 5-5s5 1 5 5v2H7v-2z" fill="#ccc"/><path d="M3 13h18M12 8v5M17 15l-3 4" stroke="#ccc" stroke-width="1.5"/></svg>He</span>
+    <span style="display:flex;align-items:center;gap:2px;"><svg viewBox="0 0 24 24" width="12" height="12"><path d="M12 3c-4.5 0-7 4-7 8 0 4 2 7 5 9h4c3-2 5-5 5-9 0-4-2.5-8-7-8z" fill="#ccc"/></svg>Ba</span>
+  </div>
+</div>
+
+<script>
+const URL = 'proxy.php';
+const INTERVALO = 3000;
+
+const map = L.map('map', { zoomControl: true }).setView([-14.5, -49], 5);
+
+const temas = {
+  '🌗 OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OSM', maxZoom: 19,
+  }),
+  '🌑 Esri Cinza Escuro': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+    attribution: '&copy; Esri', maxZoom: 16,
+  }),
+  '🌓 Esri Cinza Claro': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+    attribution: '&copy; Esri', maxZoom: 16,
+  }),
+  '🛰️ Satélite Esri': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    attribution: '&copy; Esri', maxZoom: 19,
+  }),
+};
+const temaSalvo = localStorage.getItem('tema');
+(temas[temaSalvo] || temas['🌗 OpenStreetMap']).addTo(map);
+const layerControl = L.control.layers(temas, null, { position: 'topright' }).addTo(map);
+map.on('baselayerchange', e => localStorage.setItem('tema', e.name));
+
+let aircraftMap = null;
+
+(async () => {
+  try {
+    const resp = await fetch('aircraft_map.json?_=' + Date.now());
+    if (resp.ok) aircraftMap = await resp.json();
+  } catch (_) {}
+})();
+
+const lastPosicoes = new Map();
+const CACHE_TTL = 90000;
+
+let markers = [];
+let hexPopupAberto = null;
+let seguindoHex = null;
+let seguindoCallsign = '';
+
+function limparMarcadores() {
+  markers.forEach(m => {
+    if (m.isPopupOpen()) hexPopupAberto = m.hex;
+    map.removeLayer(m);
+  });
+  markers = [];
+}
+
+function corPorAltitude(alt) {
+  if (alt === 'ground' || alt == null) return '#e74c3c';
+  const a = Number(alt);
+  if (a <= 0) return '#e74c3c';
+  if (a < 10000) return '#f39c12';
+  if (a < 30000) return '#3498db';
+  return '#2ecc71';
+}
+
+function tipoMsg(tipo) {
+  if (tipo === 'mlat') return '#9b59b6';
+  return null;
+}
+
+function tipoIcone(cat, modelo, alt, gs) {
+  if (modelo && modelo.t) {
+    const t = modelo.t;
+    if (/^EC\d|^R\d{2}|^AS\d|^BELL|^MD\d|^S-?76|^AW\d|^BO\d|^BK\d|^SA\d|^HU\d|^MI-\d/i.test(t)) return 'heli';
+    if (/^BALL|^BALN|^ZEAL|^BLMP/i.test(t)) return 'balloon';
+    if (/^GLEX|^GLOB|^GLF\d|^CL3\d|^CL6\d|^E55P|^E35L|^C25[AB]|^FA7X|^F2TH|^HAWK|^MIRG|^F-?\d{2}|^SAAB|^LJ\d|^BE[45]0|^C680|^C56X|^CE-?5|^CITATION/i.test(t)) return 'jet';
+  }
+  if (cat === 'A4') return 'jet';
+  if (cat === 'A5') {
+    if (typeof alt === 'number' && alt > 15000) return 'plane';
+    if (typeof gs === 'number' && gs > 200) return 'plane';
+    return 'heli';
+  }
+  if (cat === 'A7') {
+    if (typeof gs === 'number' && gs > 30) return 'plane';
+    return 'balloon';
+  }
+  return 'plane';
+}
+
+function svgPorTipo(tipo, cor) {
+  switch (tipo) {
+    case 'jet':
+      return `<path d="M12 2C9 8 4 11 3 15l4-1 5-3 5 3 4 1c-1-4-6-7-9-13zM12 11v8l-2 2v1l2-1 2 1v-1l-2-2v-8z" fill="${cor}" stroke="#fff" stroke-width=".6"/>`;
+    case 'heli':
+      return `<path d="M3 7h18M3 9h18" stroke="${cor}" stroke-width="1.5" fill="none"/>
+        <circle cx="12" cy="8" r="2" fill="${cor}" stroke="#fff" stroke-width=".6"/>
+        <path d="M8 10C6 10 5 12 5 14c0 3 2 4 7 4s7-1 7-4c0-2-1-4-3-4z" fill="${cor}" stroke="#fff" stroke-width=".6"/>
+        <path d="M12 18v4" stroke="${cor}" stroke-width="1.5" fill="none"/>
+        <path d="M9 21h6" stroke="${cor}" stroke-width="1.5" fill="none"/>`;
+    case 'balloon':
+      return `<path d="M12 3c-4.5 0-7 4-7 8 0 4 2 7 5 9h4c3-2 5-5 5-9 0-4-2.5-8-7-8z" fill="${cor}" stroke="#fff" stroke-width=".6"/>
+        <rect x="11" y="20" width="2" height="2" rx=".5" fill="${cor}" stroke="#fff" stroke-width=".6"/>
+        <path d="M12 20v-2" stroke="${cor}" stroke-width="1" fill="none"/>`;
+    default:
+      return `<path d="M21 16v-2l-8-5V3.5A1.5 1.5 0 0 0 11.5 2 1.5 1.5 0 0 0 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z" fill="${cor}" stroke="#fff" stroke-width=".7"/>`;
+  }
+}
+
+function iconeAeronave(alt, track, tipo, flight, stale, cat, modelo, gs) {
+  const cor = tipoMsg(tipo) || corPorAltitude(alt);
+  const tipoIco = tipoIcone(cat, modelo, alt, gs);
+  const rotacao = (track != null && tipoIco !== 'balloon') ? track : 0;
+  const label = flight ? flight.trim() : '';
+  const svgPaths = svgPorTipo(tipoIco, cor);
+
+  const html = `<div style="display:flex;flex-direction:column;align-items:center;${stale ? 'opacity:.5;' : ''}">
+    <div${tipoIco !== 'balloon' ? ` style="transform:rotate(${rotacao}deg)"` : ''}>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="26" height="26">
+        ${svgPaths}
+      </svg>
+    </div>
+    ${label ? `<span class="plane-label${stale ? ' stale' : ''}">${label}${stale ? ' *' : ''}</span>` : ''}
+  </div>`;
+  return L.divIcon({
+    html: html,
+    className: '',
+    iconSize: [80, 44],
+    iconAnchor: [40, 14],
+  });
+}
+
+function infoAeronave(a) {
+  const alt = a.alt_baro === 'ground' ? 'Solo' : (a.alt_baro != null ? a.alt_baro.toLocaleString() + ' pés' : '—');
+  const gs = a.gs != null ? a.gs.toFixed(1) + ' kn' : '—';
+  const track = a.track != null ? a.track.toFixed(1) + '°' : '—';
+  const squawk = a.squawk || '—';
+  const emergencia = a.emergency && a.emergency !== 'none' ? `🚨 ${a.emergency}` : '';
+  const tipo = a.type || '—';
+  const rssi = a.rssi != null ? a.rssi.toFixed(1) + ' dB' : '—';
+  const msg = a.messages != null ? a.messages.toLocaleString() : '—';
+  const voo = a.flight ? a.flight.trim() : '—';
+  const modelo = a._modelo;
+  const modeloStr = modelo ? `${modelo.m} (${modelo.f})` : '—';
+
+  return `
+    <div style="font-family:monospace">
+      <b style="font-size:15px;color:#1a1a2e;">✈ ${voo}${a._stale ? ' <span style="color:#888;font-weight:400;font-size:11px;">(cache)</span>' : ''}</b>
+      <hr style="margin:4px 0;border-color:#eee;">
+      <b>ICAO:</b> ${a.hex} &nbsp;|&nbsp; <b>Tipo:</b> ${tipo}<br>
+      <b>Modelo:</b> ${modeloStr}<br>
+      <b>Altitude:</b> ${alt}<br>
+      <b>Velocidade:</b> ${gs}<br>
+      <b>Rumo:</b> ${track}<br>
+      <b>Categoria:</b> ${a.category || '—'}<br>
+      <b>Squawk:</b> ${squawk} ${emergencia}<br>
+      <b>Sinal:</b> ${rssi}<br>
+      <b>Mensagens:</b> ${msg}<br>
+      <b>Lat:</b> ${a.lat != null ? a.lat.toFixed(4) : '—'}<br>
+      <b>Lon:</b> ${a.lon != null ? a.lon.toFixed(4) : '—'}
+    </div>`;
+}
+
+async function atualizar() {
+  try {
+    const resp = await fetch(URL + '?_=' + Date.now());
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    const agora = new Date().toLocaleTimeString('pt-BR');
+    document.getElementById('ultima-atualizacao').textContent = agora;
+
+    const aeronaves = data.aircraft || [];
+    document.getElementById('total').textContent = aeronaves.length;
+
+    const agoraMs = Date.now();
+
+    const comPosicao = [];
+    const semPosicao = [];
+
+    aeronaves.forEach(a => {
+      if (a.lat != null && a.lon != null) {
+        comPosicao.push(a);
+        lastPosicoes.set(a.hex, {
+          lat: a.lat, lon: a.lon,
+          track: a.track,
+          alt_baro: a.alt_baro,
+          gs: a.gs,
+          flight: a.flight,
+          type: a.type,
+          category: a.category,
+          squawk: a.squawk,
+          rssi: a.rssi,
+          messages: a.messages,
+          time: agoraMs
+        });
+      } else {
+        semPosicao.push(a);
+      }
+    });
+
+    const comCache = [];
+    semPosicao.forEach(a => {
+      const cache = lastPosicoes.get(a.hex);
+      if (cache && (agoraMs - cache.time) < CACHE_TTL) {
+        comCache.push({
+          hex: a.hex,
+          flight: a.flight,
+          alt_baro: a.alt_baro,
+          gs: a.gs,
+          track: cache.track,
+          type: a.type,
+          category: cache.category,
+          squawk: a.squawk,
+          rssi: a.rssi,
+          messages: a.messages,
+          lat: cache.lat,
+          lon: cache.lon,
+          _stale: true
+        });
+      }
+    });
+
+    const totalExibido = comPosicao.length + comCache.length;
+    document.getElementById('com-posicao').textContent =
+      comPosicao.length + (comCache.length > 0 ? ` (+${comCache.length} cache)` : '');
+
+    if (totalExibido === 0) return;
+
+    limparMarcadores();
+
+    [...comPosicao, ...comCache].forEach(a => {
+      a._modelo = aircraftMap ? aircraftMap[a.hex] : null;
+      const icon = iconeAeronave(a.alt_baro, a.track, a.type, a.flight, a._stale, a.category, a._modelo, a.gs);
+      const marker = L.marker([a.lat, a.lon], { icon }).bindPopup(infoAeronave(a));
+      const rotulo = a.flight ? a.flight.trim() : a.hex;
+      const altLabel = a.alt_baro === 'ground' ? 'Solo' : (a.alt_baro != null ? a.alt_baro + 'pés' : '—');
+      const velLabel = a.gs != null ? a.gs.toFixed(0) + 'kn' : '';
+      marker.bindTooltip((a._stale ? '☁ ' : '') + rotulo + ' | ' + altLabel + (velLabel ? ' | ' + velLabel : ''), {
+        direction: 'top', offset: [0, -14], opacity: .85
+      });
+      marker.hex = a.hex;
+      marker.on('dblclick', () => {
+        seguindoHex = a.hex;
+        seguindoCallsign = rotulo;
+        document.getElementById('seguir-callsign').textContent = rotulo;
+        document.getElementById('seguir-bar').style.display = 'flex';
+      });
+      markers.push(marker);
+      marker.addTo(map);
+    });
+
+    if (hexPopupAberto) {
+      const m = markers.find(m => m.hex === hexPopupAberto);
+      if (m) m.openPopup();
+      hexPopupAberto = null;
+    }
+
+    if (seguindoHex) {
+      const m = markers.find(m => m.hex === seguindoHex);
+      if (m) map.panTo(m.getLatLng(), { animate: true, duration: 1 });
+      else {
+        seguindoHex = null;
+        document.getElementById('seguir-bar').style.display = 'none';
+      }
+    }
+
+  } catch (err) {
+    document.getElementById('ultima-atualizacao').textContent = '⚠ erro: ' + err.message;
+  }
+}
+
+atualizar();
+setInterval(atualizar, INTERVALO);
+
+// ---- Radar sweep layer (canvas) ----
+const RadarSweepLayer = L.Layer.extend({
+  options: { center: null, radiusKm: 150, speed: 7.5 },
+  initialize: function(opts) {
+    L.setOptions(this, opts);
+    this._angle = 0; this._lastTime = 0; this._active = false;
+  },
+  onAdd: function(map) {
+    this._canvas = L.DomUtil.create('canvas');
+    this._canvas.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none';
+    const size = map.getSize();
+    this._canvas.width = size.x; this._canvas.height = size.y;
+    this._ctx = this._canvas.getContext('2d');
+    map.getPanes().overlayPane.appendChild(this._canvas);
+    map.on('move resize zoom', this._resize, this);
+    this._active = true;
+    this._resize();
+    this._animate();
+  },
+  onRemove: function(map) {
+    this._active = false;
+    cancelAnimationFrame(this._frameId);
+    map.off('move resize zoom', this._resize, this);
+    L.DomUtil.remove(this._canvas);
+  },
+  _resize: function() {
+    if (!this._active) return;
+    const size = this._map.getSize();
+    this._canvas.width = size.x; this._canvas.height = size.y;
+    const c = this.options.center;
+    if (!c || !this._map) { this._pixelRadius = 0; return; }
+    const deltaLat = (this.options.radiusKm * 1000 / 6371000) * (180 / Math.PI);
+    const cp = this._map.latLngToContainerPoint(c);
+    const ep = this._map.latLngToContainerPoint(L.latLng(c.lat + deltaLat, c.lng));
+    this._pixelRadius = Math.abs(ep.y - cp.y);
+  },
+  _animate: function() {
+    if (!this._active) return;
+    const now = performance.now();
+    const dt = now - (this._lastTime || now);
+    this._lastTime = now;
+    this._angle = (this._angle + 360 * dt / 1000 / this.options.speed) % 360;
+    this._draw();
+    this._frameId = requestAnimationFrame(() => this._animate());
+  },
+  _draw: function() {
+    if (!this._active) return;
+    const ctx = this._ctx;
+    if (!ctx) return;
+    const size = this._map.getSize();
+    ctx.clearRect(0, 0, size.x, size.y);
+    const c = this.options.center;
+    if (!c) return;
+    const cp = this._map.latLngToContainerPoint(c);
+    const pr = this._pixelRadius;
+    if (pr < 2) return;
+    const ang = this._angle * Math.PI / 180;
+    const bw = 0.3;
+    ctx.save();
+    ctx.translate(cp.x, cp.y);
+    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, pr);
+    grad.addColorStop(0, 'rgba(11,122,11,0.95)');
+    grad.addColorStop(0.5, 'rgba(11,122,11,0.55)');
+    grad.addColorStop(1, 'rgba(11,122,11,0.05)');
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.arc(0, 0, pr, ang - bw, ang);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(pr * Math.cos(ang), pr * Math.sin(ang));
+    ctx.strokeStyle = 'rgba(11,122,11,0.85)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(pr * Math.cos(ang), pr * Math.sin(ang), 5, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(11,122,11,0.9)';
+    ctx.fill();
+    ctx.restore();
+  }
+});
+
+// ---- Controle de círculos concêntricos (30 km) ----
+const DistControl = L.Control.extend({
+  options: { position: 'topright' },
+  onAdd: function() {
+    const div = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+    div.innerHTML = `<button id="btn-dist" title="Marcar ponto central" style="display:block;width:100%;padding:4px 6px;cursor:pointer;background:#fff;border:none;font-size:18px;line-height:1">📍</button>`;
+    L.DomEvent.disableClickPropagation(div);
+    return div;
+  }
+});
+new DistControl().addTo(map);
+
+let pontoMarcado = null;
+let circulos = [];
+let sweepLayer = null;
+let estadoDist = 'pronto'; // 'pronto' | 'marcando' | 'marcado'
+
+function limparDist() {
+  estadoDist = 'pronto';
+  map.getContainer().style.cursor = '';
+  const btn = document.getElementById('btn-dist');
+  btn.textContent = '📍';
+  btn.title = 'Marcar ponto central';
+  if (pontoMarcado) { map.removeLayer(pontoMarcado); pontoMarcado = null; }
+  if (sweepLayer) { map.removeLayer(sweepLayer); sweepLayer = null; }
+  circulos.forEach(c => map.removeLayer(c));
+  circulos = [];
+}
+
+document.getElementById('btn-dist').addEventListener('click', function() {
+  if (estadoDist === 'marcando') { limparDist(); return; }
+  if (estadoDist === 'marcado') { limparDist(); return; }
+  estadoDist = 'marcando';
+  this.textContent = '✕';
+  this.title = 'Cancelar';
+  map.getContainer().style.cursor = 'crosshair';
+});
+
+document.getElementById('seguir-cancelar').addEventListener('click', function() {
+  seguindoHex = null;
+  document.getElementById('seguir-bar').style.display = 'none';
+});
+
+map.on('click', function(e) {
+  if (seguindoHex) {
+    seguindoHex = null;
+    document.getElementById('seguir-bar').style.display = 'none';
+  }
+  if (estadoDist !== 'marcando') return;
+  if (pontoMarcado) map.removeLayer(pontoMarcado);
+  if (sweepLayer) { map.removeLayer(sweepLayer); sweepLayer = null; }
+  circulos.forEach(c => map.removeLayer(c));
+  circulos = [];
+
+  pontoMarcado = L.marker([e.latlng.lat, e.latlng.lng], {
+    icon: L.divIcon({
+      html: '<div style="background:#e74c3c;width:14px;height:14px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 4px #000"></div>',
+      className: '', iconSize: [18, 18], iconAnchor: [9, 9]
+    })
+  }).addTo(map);
+
+  const kmPerDegLon = 111.32 * Math.cos(e.latlng.lat * Math.PI / 180);
+  const raios = [30, 60, 90, 120, 150];
+  raios.forEach((km, i) => {
+    const c = L.circle([e.latlng.lat, e.latlng.lng], {
+      radius: km * 1000,
+      color: 'rgba(11,122,11,0.5)',
+      fillOpacity: 0,
+      weight: 1.5,
+      dashArray: i === 0 ? '' : '4 6',
+      interactive: false
+    }).addTo(map);
+    circulos.push(c);
+
+    const label = L.marker([e.latlng.lat, e.latlng.lng + km / kmPerDegLon], {
+      icon: L.divIcon({
+        html: `<span style="color:#0b7a0b;font-size:11px;font-weight:600;background:rgba(235,255,235,.85);padding:1px 5px;border-radius:3px;border:1px solid rgba(11,122,11,.3)">${km} km</span>`,
+        className: '', iconSize: [0, 0]
+      }),
+      interactive: false
+    }).addTo(map);
+    circulos.push(label);
+  });
+
+  sweepLayer = new RadarSweepLayer({ center: e.latlng }).addTo(map);
+
+  estadoDist = 'marcado';
+  map.getContainer().style.cursor = '';
+  const btn = document.getElementById('btn-dist');
+  btn.textContent = '🗑';
+  btn.title = 'Limpar';
+});
+</script>
+</body>
+</html>

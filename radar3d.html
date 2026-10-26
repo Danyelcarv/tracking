@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Radar 3D – TrafegoAereo</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/utils/BufferGeometryUtils.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; overflow: hidden; background: #000; }
+#selecao, #cena3d { position: absolute; inset: 0; }
+#mini-map { height: 100%; }
+.painel {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+  z-index: 1000; background: rgba(0,0,0,.8); color: #fff;
+  padding: 10px 18px; border-radius: 10px; font-size: 13px;
+  display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+  backdrop-filter: blur(4px); max-width: 92vw;
+}
+.painel b { color: #4fc3f7; }
+.raios { display: flex; gap: 4px; }
+.raios button {
+  background: #222; color: #ccc; border: 1px solid #444; border-radius: 6px;
+  padding: 4px 8px; font-size: 12px; cursor: pointer;
+}
+.raios button.ativo { background: #4fc3f7; color: #000; border-color: #4fc3f7; font-weight: 600; }
+#btn-entrar {
+  background: #2ecc71; color: #06260f; border: none; border-radius: 6px;
+  padding: 6px 14px; font-size: 13px; font-weight: 700; cursor: pointer;
+}
+#btn-entrar:disabled { background: #555; color: #999; cursor: not-allowed; }
+#cena3d { display: none; }
+#canvas-wrap { position: absolute; inset: 0; }
+#info-bar {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+  z-index: 1000; background: rgba(0,0,0,.75); color: #fff;
+  padding: 8px 20px; border-radius: 8px; font-size: 13px;
+  display: flex; gap: 18px; align-items: center;
+  backdrop-filter: blur(4px);
+}
+#info-bar .badge { color: #f2c94c; font-weight: bold; }
+#btn-voltar {
+  position: absolute; top: 10px; left: 10px; z-index: 1000;
+  background: rgba(0,0,0,.75); color: #fff; border: 1px solid #555;
+  border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer;
+}
+.legend {
+  position: absolute; bottom: 30px; left: 10px;
+  z-index: 1000; background: rgba(0,0,0,.7); color: #fff;
+  padding: 10px 14px; border-radius: 8px; font-size: 12px;
+  backdrop-filter: blur(4px);
+}
+.legend div { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+.legend .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+#seguir-bar {
+  position: absolute; top: 98px; left: 50%; transform: translateX(-50%);
+  z-index: 1000; background: rgba(0,0,0,.8); color: #4fc3f7;
+  padding: 4px 14px; border-radius: 20px; font-size: 13px;
+  display: none; align-items: center; gap: 10px;
+  backdrop-filter: blur(4px); border: 1px solid #4fc3f7;
+}
+#seguir-bar button {
+  background: none; border: none; color: #fff; cursor: pointer;
+  font-size: 16px; line-height: 1; padding: 0 2px;
+}
+/* bússola (fita horizontal, estilo HUD de aeronave) */
+#bussola {
+  position: absolute; top: 54px; left: 50%; transform: translateX(-50%);
+  z-index: 1000; width: 320px; height: 34px; overflow: hidden;
+  background: rgba(0,0,0,.75); border-radius: 8px; backdrop-filter: blur(4px);
+}
+#bussola-fita { position: absolute; top: 0; left: 0; height: 100%; }
+.bussola-marca {
+  position: absolute; bottom: 4px; display: flex; flex-direction: column;
+  align-items: center; transform: translateX(-50%);
+}
+.bussola-marca .linha { width: 1px; height: 6px; background: #777; }
+.bussola-marca.maior .linha { height: 10px; background: #f2c94c; }
+.bussola-marca .rotulo { font-size: 11px; color: #ddd; margin-bottom: 2px; font-weight: 600; }
+#bussola-ponteiro {
+  position: absolute; top: 2px; left: 50%; transform: translateX(-50%);
+  width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent;
+  border-top: 7px solid #4fc3f7;
+}
+/* painel lateral de detalhe da aeronave selecionada */
+#painel-detalhe {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 300px; max-width: 85vw;
+  z-index: 1001; background: rgba(14,16,20,.96); color: #eee;
+  border-left: 1px solid #333; padding: 54px 18px 18px; font-size: 13px;
+  transform: translateX(100%); transition: transform .22s ease; overflow-y: auto;
+}
+#painel-detalhe.aberto { transform: translateX(0); }
+#painel-detalhe b { color: #4fc3f7; }
+#painel-fechar {
+  position: absolute; top: 14px; right: 14px; background: #222; color: #fff;
+  border: 1px solid #555; border-radius: 6px; width: 28px; height: 28px; cursor: pointer;
+}
+#painel-conteudo .linha-info { margin: 6px 0; line-height: 1.5; }
+#painel-conteudo .acoes { margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+#painel-conteudo .acoes button {
+  background: #222; color: #fff; border: 1px solid #555; border-radius: 6px;
+  padding: 6px 10px; font-size: 12px; cursor: pointer;
+}
+#painel-conteudo .acoes button.ativo { background: #4fc3f7; color: #000; border-color: #4fc3f7; }
+#footer {
+  position: absolute; bottom: 0; left: 0; right: 0; z-index: 1000;
+  background: rgba(0,0,0,.65); color: #bbb; text-align: center;
+  padding: 4px 10px; font-size: 11px; backdrop-filter: blur(4px);
+}
+#footer a { color: #8ab4f8; text-decoration: none; }
+#carregando {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 14px; z-index: 2000; background: rgba(0,0,0,.5);
+}
+</style>
+</head>
+<body>
+
+<div id="selecao">
+  <div id="mini-map"></div>
+  <div class="painel">
+    <span>📍 Centro: <b id="centro-nome">clique num aeroporto ou no mapa</b></span>
+    <span>Raio: <span class="raios" id="raios"></span></span>
+    <button id="btn-entrar" disabled>Entrar na visualização 3D ▶</button>
+  </div>
+</div>
+
+<div id="cena3d">
+  <div id="canvas-wrap"></div>
+  <button id="btn-voltar">◀ Voltar</button>
+  <div id="info-bar">
+    <span>🛰️ <span class="badge" id="total3d">0</span> aeronaves na área</span>
+    <span>📍 <b id="centro-ativo">—</b></span>
+    <span>📏 raio <b id="raio-ativo">—</b> km</span>
+  </div>
+  <div id="seguir-bar">🛰 <span id="seguir-callsign"></span> <button id="seguir-cancelar" title="Parar de seguir">✕</button></div>
+  <div id="bussola"><div id="bussola-fita"></div><div id="bussola-ponteiro"></div></div>
+  <div id="painel-detalhe">
+    <button id="painel-fechar" title="Fechar">✕</button>
+    <div id="painel-conteudo"></div>
+  </div>
+  <div class="legend">
+    <div><span class="dot" style="background:#e74c3c;"></span> Solo</div>
+    <div><span class="dot" style="background:#f39c12;"></span> 0–10.000 pés</div>
+    <div><span class="dot" style="background:#3498db;"></span> 10k–30.000 pés</div>
+    <div><span class="dot" style="background:#2ecc71;"></span> > 30.000 pés</div>
+    <div><span class="dot" style="background:#9b59b6;"></span> MLAT</div>
+  </div>
+  <div id="footer">Radar 3D — Dados: <a href="https://trafegoaereo.com.br" target="_blank" rel="noopener">trafegoaereo.com.br</a> · Modelo 3D: <a href="https://poly.pizza/m/8ciDd9k8wha" target="_blank" rel="noopener">"Airplane" via Poly Pizza (CC-BY 3.0)</a> · <a href="index.html">◀ mapa 2D</a></div>
+</div>
+
+<div id="carregando" style="display:none">Carregando…</div>
+
+<script>
+// ---------- Dados base ----------
+let airportsMap = {};
+let aircraftMap = null;
+
+(async () => {
+  try {
+    const resp = await fetch('airports.json?_=' + Date.now());
+    if (resp.ok) airportsMap = await resp.json();
+  } catch (_) {}
+  montarMarcadoresAeroportos();
+})();
+
+(async () => {
+  try {
+    const resp = await fetch('aircraft_map.json?_=' + Date.now());
+    if (resp.ok) aircraftMap = await resp.json();
+  } catch (_) {}
+})();
+
+// modelo real de jato comercial ("Airplane", poly.pizza, CC-BY 3.0), baixado localmente
+// via baixar_modelo_aviao.php, SEM textura (só a geometria, recolorida por altitude).
+// Normalizado: comprimento (Z) = 1 unidade, nariz em -Z, centralizado — assim cada cena
+// só escala pelo tamAeronave da vez. Se não carregar, cai de volta pra geometria
+// procedural (criarGeometriaAviao).
+let modeloAviaoGeometria = null;
+let tamAeronaveAtual = null; // escala usada pela cena 3D aberta no momento (se houver)
+
+(function carregarModeloAviao() {
+  try {
+    new THREE.GLTFLoader().load('PolyPizza_Airplane.glb', (gltf) => {
+      const partes = [];
+      gltf.scene.traverse(obj => {
+        if (obj.isMesh && obj.geometry) {
+          const g = obj.geometry.clone();
+          obj.updateWorldMatrix(true, false);
+          g.applyMatrix4(obj.matrixWorld);
+          partes.push(g);
+        }
+      });
+      if (!partes.length) return;
+      const geo = THREE.BufferGeometryUtils.mergeBufferGeometries(partes, false);
+      geo.computeBoundingBox();
+      const centro = new THREE.Vector3();
+      geo.boundingBox.getCenter(centro);
+      geo.translate(-centro.x, -centro.y, -centro.z);
+      const tamanho = new THREE.Vector3();
+      geo.boundingBox.getSize(tamanho);
+      geo.rotateY(Math.PI); // modelo original tem o nariz em +Z; nossa convenção usa -Z (norte)
+      geo.scale(1 / tamanho.z, 1 / tamanho.z, 1 / tamanho.z);
+      modeloAviaoGeometria = geo;
+      aplicarModeloAviaoNaCenaAtual(); // o download é assíncrono; se a cena já tiver sido
+                                        // montada com o fallback procedural, troca agora
+    }, undefined, (err) => console.warn('Modelo 3D do avião não carregou, usando geometria procedural:', err));
+  } catch (err) {
+    console.warn('GLTFLoader indisponível, usando geometria procedural:', err);
+  }
+})();
+
+function aplicarModeloAviaoNaCenaAtual() {
+  if (!modeloAviaoGeometria || !tamAeronaveAtual || !baldes.plane) return;
+  const geometriaAntiga = Object.values(baldes.plane)[0].mesh.geometry;
+  const novaGeo = modeloAviaoGeometria.clone().scale(tamAeronaveAtual, tamAeronaveAtual, tamAeronaveAtual);
+  Object.values(baldes.plane).forEach(balde => { balde.mesh.geometry = novaGeo; });
+  geometriaAntiga.dispose();
+}
+
+// ---------- Etapa 1: seleção (Leaflet) ----------
+const temas = {
+  '🌗 OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OSM', maxZoom: 19 }),
+  '🌑 Esri Cinza Escuro': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri', maxZoom: 16 }),
+  '🌓 Esri Cinza Claro': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri', maxZoom: 16 }),
+  '🛰️ Satélite Esri': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri', maxZoom: 19 }),
+};
+const miniMap = L.map('mini-map', { zoomControl: true }).setView([-14.5, -49], 5);
+const temaSalvo = localStorage.getItem('tema');
+(temas[temaSalvo] || temas['🌗 OpenStreetMap']).addTo(miniMap);
+L.control.layers(temas, null, { position: 'topright' }).addTo(miniMap);
+miniMap.on('baselayerchange', e => localStorage.setItem('tema', e.name));
+
+let centroSelecionado = null; // { lat, lon, nome }
+let raioSelecionado = 60;
+let marcadorCentro = null;
+
+const RAIOS = [30, 60, 90, 120, 150];
+const raiosDiv = document.getElementById('raios');
+RAIOS.forEach(km => {
+  const btn = document.createElement('button');
+  btn.textContent = km + ' km';
+  if (km === raioSelecionado) btn.classList.add('ativo');
+  btn.addEventListener('click', () => {
+    raioSelecionado = km;
+    [...raiosDiv.children].forEach(b => b.classList.remove('ativo'));
+    btn.classList.add('ativo');
+  });
+  raiosDiv.appendChild(btn);
+});
+
+function definirCentro(lat, lon, nome, pistas, elevacaoFt) {
+  centroSelecionado = { lat, lon, nome, pistas: pistas || null, elevacaoFt: elevacaoFt || 0 };
+  document.getElementById('centro-nome').textContent = nome;
+  document.getElementById('btn-entrar').disabled = false;
+  if (marcadorCentro) miniMap.removeLayer(marcadorCentro);
+  marcadorCentro = L.marker([lat, lon], {
+    icon: L.divIcon({
+      html: '<div style="background:#2ecc71;width:16px;height:16px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 6px #000"></div>',
+      className: '', iconSize: [20, 20], iconAnchor: [10, 10]
+    })
+  }).addTo(miniMap);
+}
+
+function montarMarcadoresAeroportos() {
+  Object.keys(airportsMap).forEach(icao => {
+    const ap = airportsMap[icao];
+    const m = L.marker([ap.lat, ap.lon], {
+      icon: L.divIcon({
+        html: `<div style="font-size:16px;line-height:1">🛬</div>`,
+        className: '', iconSize: [20, 20], iconAnchor: [10, 10]
+      })
+    }).addTo(miniMap);
+    m.bindTooltip(`${icao} — ${ap.n}`, { direction: 'top' });
+    m.on('click', () => definirCentro(ap.lat, ap.lon, `${icao} — ${ap.n}`, ap.r, ap.elev));
+  });
+}
+
+miniMap.on('click', e => {
+  definirCentro(e.latlng.lat, e.latlng.lng, `Ponto customizado (${e.latlng.lat.toFixed(3)}, ${e.latlng.lng.toFixed(3)})`);
+});
+
+document.getElementById('btn-entrar').addEventListener('click', () => {
+  if (!centroSelecionado) return;
+  document.getElementById('selecao').style.display = 'none';
+  document.getElementById('cena3d').style.display = 'block';
+  document.getElementById('centro-ativo').textContent = centroSelecionado.nome;
+  document.getElementById('raio-ativo').textContent = raioSelecionado;
+  iniciarCena3D(centroSelecionado, raioSelecionado);
+});
+
+// ---------- Etapa 2: cena Three.js ----------
+const DEG2RAD = Math.PI / 180;
+const ALT_EXAGERO = 3;
+const CORES = { solo: 0xe74c3c, baixa: 0xf39c12, media: 0x3498db, alta: 0x2ecc71, mlat: 0x9b59b6 };
+const MAX_POR_BALDE = 40;
+const TRAIL_MAX_PONTOS = 20000; // ~19h de voo a cada 3.5s; na prática acumula a sessão inteira
+const POLL_MS = 3500;
+
+let renderer, scene, camera, controls, rafId, pollTimer;
+let baldes = {}; // categoria -> cor -> { mesh, indiceParaHex: [] }
+let aircraftData = new Map(); // hex -> dados + posição local
+let trilhas = new Map(); // hex -> [Vector3...] (acumulado ao vivo desde que a cena abriu)
+let historicoPorHex = new Map(); // hex -> [Vector3...] (reconstruído dos chunks de histórico do provedor)
+let historicoStatus = 'ocioso'; // 'ocioso' | 'carregando' | 'pronto' | 'indisponivel'
+let hexSelecionado = null;
+let seguindoHex = null;
+let mostrarTrilha = false;
+let trailLine = null;
+let centroAtivo = null;
+let raioAtivoKm = 60;
+let pointerDownPos = null;
+
+function distKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * DEG2RAD, dLon = (lon2 - lon1) * DEG2RAD;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * DEG2RAD) * Math.cos(lat2 * DEG2RAD) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// unidades da cena = QUILÔMETROS (não metros). Com raios de até 150km, coordenadas em
+// metros chegavam a dezenas de milhares de unidades, e nessa magnitude o float32 do
+// WebGL perde precisão o suficiente pra distorcer partes finas da geometria dos aviões
+// (asas somem/se deformam). Em km a maior coordenada fica < 200 — precisão de sobra.
+function paraLocal(lat, lon, altBaro, center) {
+  const x = (lon - center.lon) * 111.32 * Math.cos(center.lat * DEG2RAD);
+  const z = -(lat - center.lat) * 110.54;
+  // alt_baro é altitude acima do nível do mar, não acima da pista — sem descontar a
+  // elevação do aeroporto (ex.: SBBR ~3500 pés), a aeronave aparece "flutuando" bem
+  // acima do solo mesmo pousada.
+  const altAcimaDoCampoFt = (altBaro && altBaro !== 'ground') ? (Number(altBaro) - (center.elevacaoFt || 0)) : 0;
+  const y = Math.max(altAcimaDoCampoFt * 0.0003048 * ALT_EXAGERO, 0.002);
+  return new THREE.Vector3(x, y, z);
+}
+
+function altBucket(a) {
+  if (a.type === 'mlat') return 'mlat';
+  if (a.alt_baro === 'ground' || a.alt_baro == null) return 'solo';
+  const alt = Number(a.alt_baro);
+  if (alt <= 0) return 'solo';
+  if (alt < 10000) return 'baixa';
+  if (alt < 30000) return 'media';
+  return 'alta';
+}
+
+// avião comercial/padrão: fuselagem + asas + cauda (fallback procedural se o modelo real não carregar)
+function criarGeometriaAviao(tam) {
+  const fuselagem = new THREE.CylinderGeometry(tam * 0.08, tam * 0.14, tam, 8);
+  fuselagem.rotateX(-Math.PI / 2); // ponta (radiusTop) fica em -Z = nariz
+
+  const asas = new THREE.BoxGeometry(tam * 1.3, tam * 0.04, tam * 0.22);
+  asas.translate(0, 0, -tam * 0.02);
+
+  const estabH = new THREE.BoxGeometry(tam * 0.45, tam * 0.03, tam * 0.14);
+  estabH.translate(0, 0, tam * 0.4);
+
+  const estabV = new THREE.BoxGeometry(tam * 0.03, tam * 0.22, tam * 0.18);
+  estabV.translate(0, tam * 0.11, tam * 0.4);
+
+  return THREE.BufferGeometryUtils.mergeBufferGeometries([fuselagem, asas, estabH, estabV]);
+}
+
+// ---- Terreno com imagem de satélite real (tiles Esri, mesma fonte da camada "Satélite Esri") ----
+const ZOOM_POR_RAIO = { 30: 11, 60: 10, 90: 9, 120: 9, 150: 8 };
+const TILE_SIZE = 256;
+
+function lon2tile(lon, z) { return Math.floor((lon + 180) / 360 * 2 ** z); }
+function lat2tile(lat, z) {
+  const rad = lat * DEG2RAD;
+  return Math.floor((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * 2 ** z);
+}
+function tile2lon(x, z) { return x / 2 ** z * 360 - 180; }
+function tile2lat(y, z) {
+  const n = Math.PI - 2 * Math.PI * y / 2 ** z;
+  return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+}
+
+async function construirTerrenoSatelite(center, raioKm) {
+  const zoom = ZOOM_POR_RAIO[raioKm] || 9;
+  const halfSizeKm = raioKm * 1.3;
+  const latHalfDeg = halfSizeKm / 110.54;
+  const lonHalfDeg = halfSizeKm / (111.32 * Math.cos(center.lat * DEG2RAD));
+
+  const xMin = lon2tile(center.lon - lonHalfDeg, zoom);
+  const xMax = lon2tile(center.lon + lonHalfDeg, zoom);
+  const yMin = lat2tile(center.lat + latHalfDeg, zoom);
+  const yMax = lat2tile(center.lat - latHalfDeg, zoom);
+  const tilesX = xMax - xMin + 1, tilesY = yMax - yMin + 1;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = tilesX * TILE_SIZE;
+  canvas.height = tilesY * TILE_SIZE;
+  const ctx = canvas.getContext('2d');
+
+  const cargas = [];
+  for (let tx = xMin; tx <= xMax; tx++) {
+    for (let ty = yMin; ty <= yMax; ty++) {
+      const px = (tx - xMin) * TILE_SIZE, py = (ty - yMin) * TILE_SIZE;
+      cargas.push(new Promise(resolve => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => { ctx.drawImage(img, px, py, TILE_SIZE, TILE_SIZE); resolve(); };
+        img.onerror = () => resolve();
+        img.src = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${ty}/${tx}`;
+      }));
+    }
+  }
+  await Promise.all(cargas);
+
+  // bbox real coberto pelos tiles (alinhado ao grid de tiles, um pouco maior que o pedido)
+  const lonOeste = tile2lon(xMin, zoom), lonLeste = tile2lon(xMax + 1, zoom);
+  const latNorte = tile2lat(yMin, zoom), latSul = tile2lat(yMax + 1, zoom);
+  const larguraM = (lonLeste - lonOeste) * 111.32 * Math.cos(center.lat * DEG2RAD);
+  const alturaM = (latNorte - latSul) * 110.54;
+  const offsetXM = ((lonOeste + lonLeste) / 2 - center.lon) * 111.32 * Math.cos(center.lat * DEG2RAD);
+  const offsetZM = -((latNorte + latSul) / 2 - center.lat) * 110.54;
+
+  const texture = new THREE.CanvasTexture(canvas);
+  // canvas não é potência de 2 (depende da qtd. de tiles) — sem isso, o mapeamento a
+  // distância (visão rasante) gera um aliasing forte em listras na textura do solo
+  texture.generateMipmaps = false;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return { texture, larguraM, alturaM, offsetXM, offsetZM };
+}
+
+function adicionarPista(pista, center) {
+  const p1 = paraLocal(pista.la, pista.lo, 0, center);
+  const p2 = paraLocal(pista.ha, pista.ho, 0, center);
+  const meio = p1.clone().add(p2).multiplyScalar(0.5);
+  const comprimento = p1.distanceTo(p2) || Math.max((pista.c || 1500) * 0.0003048, 0.3);
+  // largura real (pista.l, em pés) é minúscula perto do raio da cena (até 150 km) e ficaria
+  // invisível; usamos um piso proporcional ao raio só para garantir visibilidade.
+  const larguraReal = (pista.l || 30) * 0.0003048;
+  const largura = Math.max(larguraReal, raioAtivoKm * 0.006);
+  const geo = new THREE.BoxGeometry(largura, 0.004, comprimento);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xf5f5f5, fog: false });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(meio.x, 0.002, meio.z);
+  mesh.rotation.y = Math.atan2(p2.x - p1.x, p2.z - p1.z);
+  scene.add(mesh);
+
+  // linha central amarela, para reforçar a identificação mesmo de longe
+  const linhaGeo = new THREE.BoxGeometry(largura * 0.12, 0.005, comprimento);
+  const linhaMat = new THREE.MeshBasicMaterial({ color: 0xf2c94c, fog: false });
+  const linha = new THREE.Mesh(linhaGeo, linhaMat);
+  linha.position.copy(mesh.position);
+  linha.rotation.y = mesh.rotation.y;
+  scene.add(linha);
+}
+
+// ---- Bússola (fita horizontal que mostra o rumo atual da câmera) ----
+const BUSSOLA_PX_POR_GRAU = 4;
+const BUSSOLA_MIN = -90, BUSSOLA_MAX = 450; // folga de 90° em cada ponta pra nunca faltar marca
+const BUSSOLA_NOMES = { 0: 'N', 45: 'NE', 90: 'E', 135: 'SE', 180: 'S', 225: 'SW', 270: 'W', 315: 'NW' };
+
+function montarBussola() {
+  const fita = document.getElementById('bussola-fita');
+  fita.innerHTML = '';
+  for (let d = BUSSOLA_MIN; d <= BUSSOLA_MAX; d += 15) {
+    const norm = ((d % 360) + 360) % 360;
+    const maior = norm % 45 === 0;
+    const marca = document.createElement('div');
+    marca.className = 'bussola-marca' + (maior ? ' maior' : '');
+    marca.style.left = ((d - BUSSOLA_MIN) * BUSSOLA_PX_POR_GRAU) + 'px';
+    marca.innerHTML = (maior ? `<span class="rotulo">${BUSSOLA_NOMES[norm]}</span>` : '<span class="rotulo">&nbsp;</span>') + '<span class="linha"></span>';
+    fita.appendChild(marca);
+  }
+}
+
+function atualizarBussola() {
+  if (!camera) return;
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  // bearing da direção que a câmera olha: norte = -Z, leste = +X (mesma convenção do resto da cena)
+  const headingDeg = (Math.atan2(dir.x, -dir.z) * 180 / Math.PI + 360) % 360;
+  const fita = document.getElementById('bussola-fita');
+  const largura = document.getElementById('bussola').clientWidth;
+  const offset = largura / 2 - (headingDeg - BUSSOLA_MIN) * BUSSOLA_PX_POR_GRAU;
+  fita.style.transform = `translateX(${offset}px)`;
+}
+
+function iniciarCena3D(centro, raioKm) {
+  montarBussola();
+  centroAtivo = centro;
+  raioAtivoKm = raioKm;
+  const raioM = raioKm; // "raioM" = raio em unidades da cena = km (ver nota em paraLocal)
+  const tamAeronave = raioM * 0.012;
+  tamAeronaveAtual = tamAeronave;
+
+  const wrap = document.getElementById('canvas-wrap');
+  wrap.innerHTML = '';
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a0e14);
+  scene.fog = new THREE.Fog(0x0a0e14, raioM * 0.6, raioM * 2.2);
+
+  camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.001, raioM * 5);
+  camera.position.set(0, raioM * 0.55, raioM * 0.9);
+
+  // logarithmicDepthBuffer: a cena tem alcance dinâmico de profundidade muito grande
+  // (near~1m vs far~300km) — sem isso, partes finas e próximas entre si na geometria
+  // dos aviões (ex.: asa colada na fuselagem) sofrem z-fighting e somem/se distorcem.
+  renderer = new THREE.WebGLRenderer({ antialias: false, logarithmicDepthBuffer: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  wrap.appendChild(renderer.domElement);
+
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.target.set(0, 0, 0);
+  controls.minDistance = raioM * 0.01;
+  controls.maxDistance = raioM * 2.5;
+  controls.maxPolarAngle = 1.5;
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+  const sol = new THREE.DirectionalLight(0xffffff, 0.6);
+  sol.position.set(raioM * 0.3, raioM * 0.6, raioM * 0.2);
+  scene.add(sol);
+
+  // terreno: plano simples imediato (cor contrastante) + imagem de satélite real por cima assim que carregar
+  const terrenoGeo = new THREE.CircleGeometry(raioM * 1.3, 48);
+  const terrenoMat = new THREE.MeshLambertMaterial({ color: 0x2d4a34 });
+  const terreno = new THREE.Mesh(terrenoGeo, terrenoMat);
+  terreno.rotation.x = -Math.PI / 2;
+  terreno.position.y = -0.001;
+  scene.add(terreno);
+
+  construirTerrenoSatelite(centro, raioKm).then(({ texture, larguraM, alturaM, offsetXM, offsetZM }) => {
+    if (centroAtivo !== centro) return; // usuário já saiu/trocou de cena antes de terminar de carregar
+    // substitui a geometria/material do MESMO mesh (em vez de sobrepor um 2º plano),
+    // senão os dois planos quase coplanares entram em z-fighting (listras) à distância
+    terreno.geometry.dispose();
+    terreno.geometry = new THREE.PlaneGeometry(larguraM, alturaM);
+    terreno.material.dispose();
+    terreno.material = new THREE.MeshLambertMaterial({ map: texture });
+    terreno.position.set(offsetXM, -0.001, offsetZM);
+  });
+
+  // grade de referência no solo
+  const grid = new THREE.GridHelper(raioM * 2, 20, 0x5a7a63, 0x3c5a46);
+  scene.add(grid);
+
+  // anéis de distância + rótulos
+  RAIOS.filter(km => km <= raioKm).forEach(km => {
+    const r = km;
+    const pontos = [];
+    for (let i = 0; i <= 64; i++) {
+      const ang = (i / 64) * Math.PI * 2;
+      pontos.push(new THREE.Vector3(Math.cos(ang) * r, 0.001, Math.sin(ang) * r));
+    }
+    const geo = new THREE.BufferGeometry().setFromPoints(pontos);
+    const mat = new THREE.LineBasicMaterial({ color: 0x0b7a0b, transparent: true, opacity: 0.5 });
+    scene.add(new THREE.LineLoop(geo, mat));
+  });
+
+  // pista(s) reais do aeroporto, se o centro escolhido tiver dados de runway
+  if (centro.pistas && centro.pistas.length) {
+    centro.pistas.forEach(p => adicionarPista(p, centro));
+  }
+
+  // marcador do centro (aeroporto/ponto)
+  const pinGeo = new THREE.ConeGeometry(tamAeronave * 0.6, tamAeronave * 2, 8);
+  const pinMat = new THREE.MeshLambertMaterial({ color: 0x2ecc71 });
+  const pin = new THREE.Mesh(pinGeo, pinMat);
+  pin.position.set(0, tamAeronave, 0);
+  scene.add(pin);
+
+  // modelo único (real, com fallback procedural) pra todas as aeronaves — nariz sempre
+  // aponta para norte/-Z em track 0
+  const geometriaAviao = modeloAviaoGeometria
+    ? modeloAviaoGeometria.clone().scale(tamAeronave, tamAeronave, tamAeronave)
+    : criarGeometriaAviao(tamAeronave);
+
+  baldes = { plane: {} };
+  Object.keys(CORES).forEach(nomeCor => {
+    const mat = new THREE.MeshLambertMaterial({ color: CORES[nomeCor], side: THREE.DoubleSide });
+    const mesh = new THREE.InstancedMesh(geometriaAviao, mat, MAX_POR_BALDE);
+    mesh.count = 0;
+    scene.add(mesh);
+    baldes.plane[nomeCor] = { mesh, indiceParaHex: [] };
+  });
+
+  window.addEventListener('resize', aoRedimensionar);
+  renderer.domElement.addEventListener('pointerdown', ev => { pointerDownPos = { x: ev.clientX, y: ev.clientY }; });
+  renderer.domElement.addEventListener('click', aoClicar);
+
+  animar();
+  atualizarDados();
+  pollTimer = setInterval(atualizarDados, POLL_MS);
+  carregarHistorico(centro);
+}
+
+// Reconstrói a trilha completa (até ~1h) a partir dos "chunks" de histórico que o
+// próprio provedor (tar1090) guarda — não é um endpoint por aeronave, é uma lista de
+// snapshots periódicos de TODAS as aeronaves que baixamos uma vez e indexamos por hex.
+async function carregarHistorico(centro) {
+  historicoStatus = 'carregando';
+  try {
+    const resp = await fetch('chunks.php?_=' + Date.now());
+    const indice = await resp.json();
+    const nomes = indice.chunks || [];
+    if (centroAtivo !== centro || nomes.length === 0) { historicoStatus = 'indisponivel'; return; }
+
+    const resultados = await Promise.all(nomes.map(nome =>
+      fetch(`https://adsb.trafegoaereo.com/tar1090/chunks/${nome}`)
+        .then(r => r.ok ? r.json() : null)
+        .catch(() => null)
+    ));
+
+    if (centroAtivo !== centro) return; // saiu da cena enquanto baixava
+
+    const novoHistorico = new Map();
+    resultados.forEach(dados => {
+      if (!dados || !dados.files) return;
+      dados.files.forEach(snapshot => {
+        (snapshot.aircraft || []).forEach(ac => {
+          const [hex, alt_baro, , , lat, lon] = ac;
+          if (lat == null || lon == null) return;
+          if (!novoHistorico.has(hex)) novoHistorico.set(hex, []);
+          novoHistorico.get(hex).push(paraLocal(lat, lon, alt_baro, centro));
+        });
+      });
+    });
+    historicoPorHex = novoHistorico;
+    historicoStatus = 'pronto';
+
+    if (hexSelecionado && mostrarTrilha) desenharTrilha(hexSelecionado);
+    if (hexSelecionado) atualizarPainelConteudo();
+  } catch (err) {
+    console.error('Erro ao carregar histórico de voo:', err);
+    historicoStatus = 'indisponivel';
+  }
+}
+
+function aoRedimensionar() {
+  if (!renderer) return;
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function animar() {
+  rafId = requestAnimationFrame(animar);
+  if (seguindoHex && aircraftData.has(seguindoHex)) {
+    // só reposiciona o alvo (target); o OrbitControls mantém a distância/ângulo
+    // que o usuário ajustou com zoom/rotação, então isso não cancela o "seguir"
+    controls.target.copy(aircraftData.get(seguindoHex).pos);
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  atualizarBussola();
+}
+
+async function atualizarDados() {
+  if (!centroAtivo) return;
+  try {
+    const resp = await fetch('proxy.php?_=' + Date.now());
+    if (!resp.ok || !centroAtivo) return; // pode ter voltado para a seleção enquanto buscava
+    const data = await resp.json();
+    const aeronaves = (data.aircraft || []).filter(a => a.lat != null && a.lon != null);
+
+    const naArea = aeronaves.filter(a => distKm(centroAtivo.lat, centroAtivo.lon, a.lat, a.lon) <= raioAtivoKm);
+    document.getElementById('total3d').textContent = naArea.length;
+
+    Object.values(baldes).forEach(porCor => Object.values(porCor).forEach(b => { b.indiceParaHex = []; }));
+    const contagem = {}; // categoria -> cor -> n
+    Object.keys(baldes).forEach(categoria => { contagem[categoria] = { solo: 0, baixa: 0, media: 0, alta: 0, mlat: 0 }; });
+    const vistosAgora = new Set();
+
+    const matriz = new THREE.Matrix4();
+    const quat = new THREE.Quaternion();
+    const escala = new THREE.Vector3(1, 1, 1);
+
+    naArea.forEach(a => {
+      const pos = paraLocal(a.lat, a.lon, a.alt_baro, centroAtivo);
+      const modelo = aircraftMap ? aircraftMap[a.hex] : null;
+      const categoria = 'plane';
+      const cor = altBucket(a);
+      const i = contagem[categoria][cor];
+      if (i >= MAX_POR_BALDE) return;
+
+      const yaw = -((a.track || 0) * DEG2RAD);
+      quat.setFromEuler(new THREE.Euler(0, yaw, 0));
+      matriz.compose(pos, quat, escala);
+      const balde = baldes[categoria][cor];
+      balde.mesh.setMatrixAt(i, matriz);
+      balde.indiceParaHex[i] = a.hex;
+      contagem[categoria][cor]++;
+      vistosAgora.add(a.hex);
+
+      aircraftData.set(a.hex, {
+        hex: a.hex, flight: a.flight, alt_baro: a.alt_baro, gs: a.gs, track: a.track,
+        type: a.type, category: a.category, lat: a.lat, lon: a.lon, pos, modelo,
+      });
+
+      if (!trilhas.has(a.hex)) trilhas.set(a.hex, []);
+      const trilha = trilhas.get(a.hex);
+      trilha.push(pos.clone());
+      if (trilha.length > TRAIL_MAX_PONTOS) trilha.shift();
+    });
+
+    Object.keys(baldes).forEach(categoria => {
+      Object.keys(baldes[categoria]).forEach(cor => {
+        baldes[categoria][cor].mesh.count = contagem[categoria][cor];
+        baldes[categoria][cor].mesh.instanceMatrix.needsUpdate = true;
+      });
+    });
+
+    if (hexSelecionado) {
+      if (aircraftData.has(hexSelecionado) && vistosAgora.has(hexSelecionado)) {
+        atualizarPainelConteudo();
+        if (mostrarTrilha) desenharTrilha(hexSelecionado);
+      } else {
+        fecharSelecao();
+      }
+    }
+
+    if (seguindoHex && !vistosAgora.has(seguindoHex)) {
+      pararSeguir();
+    }
+  } catch (err) {
+    console.error('Erro ao atualizar radar 3D:', err);
+  }
+}
+
+function aoClicar(ev) {
+  if (pointerDownPos) {
+    const dx = ev.clientX - pointerDownPos.x, dy = ev.clientY - pointerDownPos.y;
+    if (Math.sqrt(dx * dx + dy * dy) > 6) return; // foi um arraste (orbit/pan/zoom), não um clique de seleção
+  }
+  const rect = renderer.domElement.getBoundingClientRect();
+  const mouse = new THREE.Vector2(
+    ((ev.clientX - rect.left) / rect.width) * 2 - 1,
+    -((ev.clientY - rect.top) / rect.height) * 2 + 1
+  );
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(mouse, camera);
+
+  let melhor = null;
+  Object.values(baldes).forEach(porCor => Object.values(porCor).forEach(balde => {
+    if (balde.mesh.count === 0) return;
+    const hits = raycaster.intersectObject(balde.mesh);
+    if (hits.length && (!melhor || hits[0].distance < melhor.distance)) {
+      melhor = { distance: hits[0].distance, hex: balde.indiceParaHex[hits[0].instanceId] };
+    }
+  }));
+
+  if (melhor && melhor.hex) {
+    selecionar(melhor.hex);
+  } else {
+    fecharSelecao();
+  }
+}
+
+function selecionar(hex) {
+  hexSelecionado = hex;
+  document.getElementById('painel-detalhe').classList.add('aberto');
+  // trilha abre automaticamente ao selecionar a aeronave
+  mostrarTrilha = true;
+  desenharTrilha(hex);
+  atualizarPainelConteudo();
+}
+
+function textoStatusHistorico() {
+  if (historicoStatus === 'carregando') return '📜 Carregando histórico de voo…';
+  if (historicoStatus === 'pronto') {
+    const n = (historicoPorHex.get(hexSelecionado) || []).length;
+    return n > 0 ? `📜 Histórico carregado (~1h, ${n} pontos)` : '📜 Sem histórico anterior nesta janela de ~1h';
+  }
+  if (historicoStatus === 'indisponivel') return '📜 Histórico indisponível (mostrando só a sessão atual)';
+  return '';
+}
+
+function atualizarPainelConteudo() {
+  const a = aircraftData.get(hexSelecionado);
+  if (!a) return;
+  const alt = a.alt_baro === 'ground' ? 'Solo' : (a.alt_baro != null ? a.alt_baro.toLocaleString() + ' pés' : '—');
+  const gs = a.gs != null ? a.gs.toFixed(1) + ' kn' : '—';
+  const track = a.track != null ? a.track.toFixed(1) + '°' : '—';
+  const voo = a.flight ? a.flight.trim() : '—';
+  const modeloStr = a.modelo ? `${a.modelo.m} (${a.modelo.f})` : '—';
+
+  document.getElementById('painel-conteudo').innerHTML = `
+    <div style="font-size:16px;"><b>✈ ${voo}</b></div>
+    <hr style="margin:10px 0;border-color:#333;">
+    <div class="linha-info">ICAO: <b>${a.hex}</b></div>
+    <div class="linha-info">Tipo: ${a.type || '—'}</div>
+    <div class="linha-info">Modelo: ${modeloStr}</div>
+    <div class="linha-info">Altitude: ${alt}</div>
+    <div class="linha-info">Velocidade: ${gs}</div>
+    <div class="linha-info">Rumo: ${track}</div>
+    <div class="linha-info" style="color:#888;font-size:11px;">${textoStatusHistorico()}</div>
+    <div class="acoes">
+      <button id="acao-seguir" class="${seguindoHex === hexSelecionado ? 'ativo' : ''}">🎥 Seguir</button>
+      <button id="acao-trilha" class="${mostrarTrilha ? 'ativo' : ''}">〰 Trilha</button>
+    </div>`;
+
+  document.getElementById('acao-seguir').onclick = () => {
+    if (seguindoHex === hexSelecionado) pararSeguir(); else comecarSeguir(hexSelecionado);
+  };
+  document.getElementById('acao-trilha').onclick = () => {
+    mostrarTrilha = !mostrarTrilha;
+    if (mostrarTrilha) desenharTrilha(hexSelecionado); else removerTrilha();
+    atualizarPainelConteudo();
+  };
+}
+
+function comecarSeguir(hex) {
+  seguindoHex = hex;
+  const a = aircraftData.get(hex);
+  // posição inicial de câmera "chase" (atrás/acima); depois disso o usuário
+  // pode dar zoom/orbitar livremente que o seguir continua (ver animar())
+  const tras = new THREE.Vector3(Math.sin(-(a.track || 0) * DEG2RAD), 0, -Math.cos(-(a.track || 0) * DEG2RAD));
+  const offset = tras.clone().multiplyScalar(-raioAtivoKm * 0.06).add(new THREE.Vector3(0, raioAtivoKm * 0.04, 0));
+  camera.position.copy(a.pos.clone().add(offset));
+  controls.target.copy(a.pos);
+  document.getElementById('seguir-callsign').textContent = (a.flight || hex).trim();
+  document.getElementById('seguir-bar').style.display = 'flex';
+  atualizarPainelConteudo();
+}
+
+function pararSeguir() {
+  seguindoHex = null;
+  document.getElementById('seguir-bar').style.display = 'none';
+  if (hexSelecionado) atualizarPainelConteudo();
+}
+
+function trilhaCompleta(hex) {
+  // histórico (chunks do provedor, cobre até ~1h) + trilha ao vivo acumulada nesta sessão
+  return [...(historicoPorHex.get(hex) || []), ...(trilhas.get(hex) || [])];
+}
+
+function desenharTrilha(hex) {
+  removerTrilha();
+  const pontos = trilhaCompleta(hex);
+  if (pontos.length < 2) return;
+  const geo = new THREE.BufferGeometry().setFromPoints(pontos);
+  const mat = new THREE.LineBasicMaterial({ color: 0x4fc3f7 });
+  trailLine = new THREE.Line(geo, mat);
+  scene.add(trailLine);
+}
+
+function removerTrilha() {
+  if (trailLine) { scene.remove(trailLine); trailLine = null; }
+}
+
+function fecharSelecao() {
+  hexSelecionado = null;
+  document.getElementById('painel-detalhe').classList.remove('aberto');
+  mostrarTrilha = false;
+  removerTrilha();
+  pararSeguir();
+}
+
+document.getElementById('seguir-cancelar').addEventListener('click', pararSeguir);
+document.getElementById('painel-fechar').addEventListener('click', fecharSelecao);
+
+document.getElementById('btn-voltar').addEventListener('click', () => {
+  clearInterval(pollTimer);
+  cancelAnimationFrame(rafId);
+  window.removeEventListener('resize', aoRedimensionar);
+  if (renderer) { renderer.dispose(); renderer.domElement.remove(); }
+  fecharSelecao();
+  centroAtivo = null;
+  tamAeronaveAtual = null;
+  aircraftData.clear();
+  trilhas.clear();
+  historicoPorHex.clear();
+  historicoStatus = 'ocioso';
+  document.getElementById('cena3d').style.display = 'none';
+  document.getElementById('selecao').style.display = 'block';
+  setTimeout(() => miniMap.invalidateSize(), 50);
+});
+</script>
+</body>
+</html>
