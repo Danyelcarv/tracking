@@ -689,10 +689,17 @@ function montarCamadaAeroportos() {
   const camada = L.layerGroup();
   Object.keys(airportsMap).forEach(icao => {
     const ap = airportsMap[icao];
+    // pino + linha a 90° (vertical) + código ICAO sempre visível, estilo carta
+    // aeronáutica — antes só aparecia o código no tooltip ao passar o mouse, difícil
+    // de ler com vários aeroportos aglomerados.
     const m = L.marker([ap.lat, ap.lon], {
       icon: L.divIcon({
-        html: `<div style="font-size:16px;line-height:1">🛬</div>`,
-        className: '', iconSize: [20, 20], iconAnchor: [10, 10]
+        html: `<div style="display:flex;flex-direction:column;align-items:center;">
+          <div style="font-size:16px;line-height:1;">🛬</div>
+          <div style="width:1px;height:14px;background:rgba(255,255,255,.85);"></div>
+          <span style="font-size:10px;font-weight:700;color:#fff;background:rgba(0,0,0,.75);padding:1px 5px;border-radius:3px;white-space:nowrap;margin-top:-1px;">${icao}</span>
+        </div>`,
+        className: '', iconSize: [80, 54], iconAnchor: [40, 9]
       })
     });
     m.bindTooltip(`${icao} — ${ap.n}`, { direction: 'top' });
