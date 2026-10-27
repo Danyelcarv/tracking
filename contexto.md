@@ -4,9 +4,9 @@ Documento de referência para retomar o trabalho neste projeto no futuro. Descre
 
 ## Visão geral
 
-Rastreador de tráfego aéreo ADS-B em tempo real, com duas visualizações:
-- **Mapa 2D** (`index.html`) — Leaflet, aeronaves como ícones sobre mapa de ruas/satélite.
-- **Radar 3D** (`radar3d.html`) — Three.js, aeronaves como modelo 3D sobre terreno de satélite real, com seleção, trilha de voo e câmera "seguir".
+Rastreador de tráfego aéreo ADS-B em tempo real, **tudo numa única página** (`index.html`):
+- **Mapa 2D ao vivo** (Leaflet) — modo padrão ao abrir a página.
+- **Modo 3D** (Three.js) — acionado pelo botão "🌐 Modo 3D" no rodapé; a seleção do centro/raio acontece sobre o PRÓPRIO mapa 2D ao vivo (não é mais uma página/mini-mapa separado — ver "Fusão em página única" abaixo).
 
 Dados ao vivo vêm de `adsb.trafegoaereo.com/tar1090` (feed público ADS-B/MLAT do Brasil), acessado via proxy PHP local para evitar CORS.
 
@@ -14,22 +14,36 @@ Dados ao vivo vêm de `adsb.trafegoaereo.com/tar1090` (feed público ADS-B/MLAT 
 
 | Arquivo | Função |
 |---|---|
-| `index.html` | Mapa 2D principal (Leaflet). Ícones por categoria (avião/jato/helicóptero/balão), cor por altitude, cache de 90s para aeronaves sem posição atual, círculos de distância (30–150km) com radar sweep animado, "seguir aeronave". |
-| `proxy.php` | Proxy que busca `aircraft.json` do tar1090 (evita CORS). Usado tanto pelo mapa 2D quanto pelo radar 3D. |
+| `index.html` | Página única: mapa 2D ao vivo (Leaflet) + cena 3D (Three.js), alternados por JS (sem navegação de página). Ver detalhes abaixo. |
+| `proxy.php` | Proxy que busca `aircraft.json` do tar1090 (evita CORS). Usado tanto pelo modo 2D quanto pelo 3D. |
 | `mapear_aeronaves.php` | Script um-tiro: baixa `aircraftDatabase.csv` da OpenSky, gera `aircraft_map.json` (modelo/fabricante por ICAO hex), filtrado por prefixos brasileiros (e4, e8). |
 | `aircraft_map.json` | Cache gerado pelo script acima (~4000 aeronaves). |
 | `mapear_aeroportos.php` | Baixa `airports.csv` e `runways.csv` da OurAirports, gera `airports.json` com aeroportos grandes/médios do Brasil + pistas + elevação. |
 | `airports.json` | Cache gerado (138 aeroportos, 70 pistas, elevação em pés). |
-| `chunks.php` | Proxy do índice de histórico (`chunks/chunks.json`) do tar1090 — usado pelo radar 3D para reconstruir trilhas de voo de até ~1h. |
-| `radar3d.html` | Visualização 3D (ver seção dedicada abaixo). |
+| `chunks.php` | Proxy do índice de histórico (`chunks/chunks.json`) do tar1090 — usado pelo modo 3D para reconstruir trilhas de voo de até ~1h. |
 | `baixar_modelo_aviao.php` | Baixa uma vez o modelo 3D do avião (`PolyPizza_Airplane.glb`) para servir localmente. |
-| `PolyPizza_Airplane.glb` | Modelo 3D do jato comercial usado no radar 3D (ver "Modelo 3D" abaixo). |
+| `PolyPizza_Airplane.glb` | Modelo 3D do jato comercial usado no modo 3D (ver "Modelo 3D" abaixo). |
+| `contexto.md` | Este arquivo. |
 
-## Radar 3D (`radar3d.html`) — detalhes
+## Fusão em página única (histórico da mudança)
 
-### Fluxo
-1. **Tela de seleção**: mini-mapa Leaflet com aeroportos marcados (clicáveis) + clique em qualquer ponto do mapa define um centro customizado. Seletor de raio (30/60/90/120/150 km).
-2. **Cena 3D**: ao entrar, monta a cena Three.js centrada no ponto escolhido.
+Originalmente o modo 3D vivia num arquivo separado (`radar3d.html`), com seu próprio mini-mapa Leaflet estático só para escolher o centro/raio antes de entrar na cena 3D — sem o monitoramento ao vivo. O usuário pediu para unificar: o `index.html` (mapa 2D ao vivo) passou a ser também a tela de seleção do modo 3D, e `radar3d.html` foi **apagado**.
+
+### Como funciona agora
+- Botão **"🌐 Modo 3D"** no rodapé chama `ativarModo3D()`: mostra um painel flutuante (`#modo3d-painel`, na parte de baixo da tela) com seletor de raio (30–150km) + mostra os marcadores de aeroportos (`#airports.json`) sobre o mapa **que continua ao vivo, com os aviões se movendo**.
+- Clicar num aeroporto OU em qualquer ponto do mapa chama `definirCentro3D(...)`, habilitando o botão "Entrar na visualização 3D".
+- Ao confirmar: `clearInterval(intervalo2D)` pausa o polling 2D, esconde `#map`/`#info-bar`/`#legend-2d`, mostra `#cena3d`, chama `iniciarCena3D(centro, raio)`.
+- Botão **"◀ Voltar ao mapa 2D"** desfaz tudo: destrói a cena 3D (renderer.dispose, limpa intervals), reexibe o mapa 2D e **retoma o polling** (`intervalo2D = setInterval(atualizar, INTERVALO)`).
+
+### Cuidado com colisão de IDs/variáveis ao mexer nisso
+Os dois fluxos (2D e 3D) compartilham o mesmo `<script>`, então nomes que existiam duplicados nos dois arquivos originais foram renomeados pra não colidir:
+- `#info-bar` → `#r3d-info-bar` (3D) continua existindo só dentro de `#cena3d`; o `#info-bar` original é do 2D.
+- `#seguir-bar` / `#seguir-callsign` / `#seguir-cancelar` (2D, "seguir" por duplo-clique no mapa) vs `#r3d-seguir-bar` / `#r3d-seguir-callsign` / `#r3d-seguir-cancelar` (3D, botão "Seguir" no painel da aeronave).
+- `seguindoHex` (variável JS, 2D) vs `seguindoHex3D` (3D) — **são conceitos diferentes, não renomeie um pensando que é o outro**.
+- `.legend` é uma classe (não colide), mas tem dois elementos com IDs distintos: `#legend-2d` e `#legend-3d`, alternados junto com o resto da UI de cada modo.
+- O mapa Leaflet (`map`) é UM SÓ, reaproveitado tanto pro monitoramento normal quanto pra seleção do centro 3D — não existe mais um `miniMap` separado.
+
+## Modo 3D — detalhes
 
 ### Sistema de coordenadas
 - Plano local tangente (ENU), **unidades da cena = QUILÔMETROS** (não metros — decisão importante, ver "Bugs resolvidos").
