@@ -1284,6 +1284,7 @@ function iniciarCena3D(centro, raioKm) {
   window.addEventListener('resize', aoRedimensionar);
   renderer.domElement.addEventListener('pointerdown', ev => { pointerDownPos = { x: ev.clientX, y: ev.clientY }; });
   renderer.domElement.addEventListener('click', aoClicar);
+  renderer.domElement.addEventListener('dblclick', aoClicarDuplo);
 
   animar();
   atualizarDados3D();
@@ -1435,11 +1436,8 @@ async function atualizarDados3D() {
   }
 }
 
-function aoClicar(ev) {
-  if (pointerDownPos) {
-    const dx = ev.clientX - pointerDownPos.x, dy = ev.clientY - pointerDownPos.y;
-    if (Math.sqrt(dx * dx + dy * dy) > 6) return; // foi um arraste (orbit/pan/zoom), não um clique de seleção
-  }
+// acha a aeronave (se houver) sob o ponteiro do mouse via raycaster
+function aeronaveNoPonteiro(ev) {
   const rect = renderer.domElement.getBoundingClientRect();
   const mouse = new THREE.Vector2(
     ((ev.clientX - rect.left) / rect.width) * 2 - 1,
@@ -1456,12 +1454,29 @@ function aoClicar(ev) {
       melhor = { distance: hits[0].distance, hex: balde.indiceParaHex[hits[0].instanceId] };
     }
   }));
+  return melhor ? melhor.hex : null;
+}
 
-  if (melhor && melhor.hex) {
-    selecionar(melhor.hex);
-  } else {
-    fecharSelecao();
-  }
+function foiArraste(ev) {
+  if (!pointerDownPos) return false;
+  const dx = ev.clientX - pointerDownPos.x, dy = ev.clientY - pointerDownPos.y;
+  return Math.sqrt(dx * dx + dy * dy) > 8; // orbit/pan/zoom, não um clique de seleção
+}
+
+function aoClicar(ev) {
+  if (foiArraste(ev)) return;
+  const hex = aeronaveNoPonteiro(ev);
+  // clique único em espaço vazio não fecha mais a seleção: ao tentar orbitar
+  // segurando o botão perto de uma aeronave selecionada, um arraste que "volta"
+  // perto do ponto inicial era lido como clique vazio e perdia a seleção.
+  // Agora só seleciona/troca de aeronave; fechar precisa de duplo-clique.
+  if (hex) selecionar(hex);
+}
+
+function aoClicarDuplo(ev) {
+  if (foiArraste(ev)) return;
+  const hex = aeronaveNoPonteiro(ev);
+  if (hex) selecionar(hex); else fecharSelecao();
 }
 
 function selecionar(hex) {
