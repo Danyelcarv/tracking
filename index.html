@@ -101,6 +101,11 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; overflow
   backdrop-filter: blur(4px);
 }
 #r3d-info-bar .badge { color: #f2c94c; font-weight: bold; }
+#r3d-info-bar button {
+  background: #222; color: #fff; border: 1px solid #555; border-radius: 6px;
+  padding: 4px 10px; font-size: 12px; cursor: pointer;
+}
+#r3d-info-bar button.ativo { background: #4fc3f7; color: #000; border-color: #4fc3f7; }
 #btn-voltar {
   position: absolute; top: 10px; left: 10px; z-index: 1000;
   background: rgba(0,0,0,.75); color: #fff; border: 1px solid #555;
@@ -199,6 +204,8 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; overflow
     <span>🛰️ <span class="badge" id="total3d">0</span> aeronaves na área</span>
     <span>📍 <b id="centro-ativo">—</b></span>
     <span>📏 raio <b id="raio-ativo">—</b> km</span>
+    <button id="btn-rotulos-aeronaves" title="Mostrar altitude, velocidade e rumo em cada aeronave">🏷️ Rótulos</button>
+    <button id="btn-trilhas-todas" title="Mostrar a trilha de todas as aeronaves">〰 Trilhas</button>
   </div>
   <div id="r3d-seguir-bar">🛰 <span id="r3d-seguir-callsign"></span> <button id="r3d-seguir-cancelar" title="Parar de seguir">✕</button></div>
   <div id="bussola"><div id="bussola-fita"></div><div id="bussola-ponteiro"></div></div>
@@ -802,9 +809,13 @@ let hexSelecionado = null;
 let seguindoHex3D = null;
 let mostrarTrilha = false;
 let trailLine = null;
+let mostrarTodasTrilhas = false;
+let fitasTodasAeronaves = new Map(); // hex -> Mesh (fita de trilha de cada aeronave)
 let centroAtivo = null;
 let raioAtivoKm = 60;
 let pointerDownPos = null;
+let mostrarRotulosAeronaves = false;
+let rotulosAeronaves = new Map(); // hex -> { sprite, chave } (rótulo de altitude/velocidade/rumo)
 
 // modelo real de jato comercial ("Airplane", poly.pizza, CC-BY 3.0), baixado localmente
 // via baixar_modelo_aviao.php, SEM textura (só a geometria, recolorida por altitude).
@@ -907,6 +918,104 @@ function criarRotuloTexto(texto, corFundo, corTexto) {
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthTest: false }));
   sprite.renderOrder = 999;
   return { sprite, aspecto: largura / altura };
+}
+
+// rótulo compacto de 3 linhas (altitude/velocidade/rumo) usado sobre cada aeronave
+// quando o botão "🏷️ Rótulos" está ativo. Fundo bem opaco + borda clara pra manter
+// contraste tanto sobre terreno claro quanto escuro do satélite.
+function criarRotuloAeronave(linhas) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const fontSize = 32;
+  const alturaLinha = fontSize * 1.15;
+  ctx.font = `bold ${fontSize}px sans-serif`;
+  const largura = Math.ceil(Math.max(...linhas.map(l => ctx.measureText(l).width))) + 24;
+  const altura = alturaLinha * linhas.length + 12;
+  canvas.width = largura;
+  canvas.height = altura;
+  ctx.font = `bold ${fontSize}px sans-serif`;
+  ctx.fillStyle = 'rgba(0,0,0,0.88)';
+  ctx.fillRect(0, 0, largura, altura);
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(1.5, 1.5, largura - 3, altura - 3);
+  ctx.fillStyle = '#ffffff';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'center';
+  linhas.forEach((linha, i) => ctx.fillText(linha, largura / 2, 6 + alturaLinha * (i + 0.5)));
+
+  const texture = new THREE.CanvasTexture(canvas);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthTest: false }));
+  sprite.renderOrder = 997;
+  return { sprite, aspecto: largura / altura };
+}
+
+function textoRotuloAeronave(a) {
+  const alt = a.alt_baro === 'ground' ? 'Solo' : (a.alt_baro != null ? Math.round(Number(a.alt_baro)).toLocaleString() + ' ft' : '— ft');
+  const gs = a.gs != null ? Math.round(a.gs) + ' kn' : '— kn';
+  const track = a.track != null ? Math.round(a.track) + '°' : '—°';
+  return [alt, gs, track];
+}
+
+function atualizarRotuloAeronave(hex, a) {
+  let entry = rotulosAeronaves.get(hex);
+  if (!entry) {
+    // linha de chamada (leader line) ligando a aeronave ao rótulo, criada uma vez só
+    const geoLinha = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+    const matLinha = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6, depthTest: false });
+    const linha = new THREE.Line(geoLinha, matLinha);
+    linha.renderOrder = 996;
+    scene.add(linha);
+    entry = { sprite: null, linha, chave: null };
+    rotulosAeronaves.set(hex, entry);
+  }
+
+  const linhas = textoRotuloAeronave(a);
+  const chave = linhas.join('|');
+  if (entry.chave !== chave) {
+    if (entry.sprite) {
+      scene.remove(entry.sprite);
+      entry.sprite.material.map.dispose();
+      entry.sprite.material.dispose();
+    }
+    const { sprite, aspecto } = criarRotuloAeronave(linhas);
+    const altura = tamAeronaveAtual * 1.1;
+    sprite.scale.set(altura * aspecto, altura, 1);
+    scene.add(sprite);
+    entry.sprite = sprite;
+    entry.chave = chave;
+  }
+
+  const offsetY = tamAeronaveAtual * 1.2;
+  entry.sprite.position.copy(a.pos);
+  entry.sprite.position.y += offsetY;
+  const baseRotulo = a.pos.clone();
+  baseRotulo.y += offsetY - entry.sprite.scale.y / 2;
+  entry.linha.geometry.setFromPoints([a.pos, baseRotulo]);
+}
+
+function removerRotuloAeronave(hex) {
+  const entry = rotulosAeronaves.get(hex);
+  if (!entry) return;
+  scene.remove(entry.linha);
+  entry.linha.geometry.dispose();
+  entry.linha.material.dispose();
+  if (entry.sprite) {
+    scene.remove(entry.sprite);
+    entry.sprite.material.map.dispose();
+    entry.sprite.material.dispose();
+  }
+  rotulosAeronaves.delete(hex);
+}
+
+function limparRotulosAeronaves() {
+  Array.from(rotulosAeronaves.keys()).forEach(removerRotuloAeronave);
+}
+
+function alternarRotulosAeronaves() {
+  mostrarRotulosAeronaves = !mostrarRotulosAeronaves;
+  document.getElementById('btn-rotulos-aeronaves').classList.toggle('ativo', mostrarRotulosAeronaves);
+  if (!mostrarRotulosAeronaves) limparRotulosAeronaves();
 }
 
 // avião comercial/padrão: fuselagem + asas + cauda (fallback procedural se o modelo real não carregar)
@@ -1231,10 +1340,11 @@ function aoRedimensionar() {
 
 function animar() {
   rafId = requestAnimationFrame(animar);
-  if (seguindoHex3D && aircraftData.has(seguindoHex3D)) {
-    // só reposiciona o alvo (target); o OrbitControls mantém a distância/ângulo
+  if (hexSelecionado && aircraftData.has(hexSelecionado)) {
+    // centro de rotação acompanha a aeronave selecionada (não só em modo "Seguir");
+    // só reposiciona o alvo (target), o OrbitControls mantém a distância/ângulo
     // que o usuário ajustou com zoom/rotação, então isso não cancela o "seguir"
-    controls.target.copy(aircraftData.get(seguindoHex3D).pos);
+    controls.target.copy(aircraftData.get(hexSelecionado).pos);
   }
   controls.update();
   renderer.render(scene, camera);
@@ -1295,6 +1405,16 @@ async function atualizarDados3D() {
         baldes[categoria][cor].mesh.instanceMatrix.needsUpdate = true;
       });
     });
+
+    if (mostrarRotulosAeronaves) {
+      vistosAgora.forEach(hex => atualizarRotuloAeronave(hex, aircraftData.get(hex)));
+      Array.from(rotulosAeronaves.keys()).forEach(hex => { if (!vistosAgora.has(hex)) removerRotuloAeronave(hex); });
+    }
+
+    if (mostrarTodasTrilhas) {
+      vistosAgora.forEach(hex => atualizarFitaAeronave(hex, CORES[altBucket(aircraftData.get(hex))]));
+      Array.from(fitasTodasAeronaves.keys()).forEach(hex => { if (!vistosAgora.has(hex)) removerFitaAeronave(hex); });
+    }
 
     if (hexSelecionado) {
       if (aircraftData.has(hexSelecionado) && vistosAgora.has(hexSelecionado)) {
@@ -1420,18 +1540,87 @@ function trilhaCompleta(hex) {
   return [...(historicoPorHex.get(hex) || []), ...(trilhas.get(hex) || [])];
 }
 
+// gera uma "fita" (faixa horizontal com largura) ao longo dos pontos da trilha, em vez de
+// uma linha fina de 1px — fica bem mais visível a qualquer distância/ângulo de câmera.
+function construirGeometriaFita(pontos, largura) {
+  if (!pontos || pontos.length < 2) return null;
+  const up = new THREE.Vector3(0, 1, 0);
+  const posArray = [];
+  for (let i = 0; i < pontos.length - 1; i++) {
+    const p0 = pontos[i], p1 = pontos[i + 1];
+    const dir = new THREE.Vector3().subVectors(p1, p0);
+    if (dir.lengthSq() < 1e-10) continue;
+    dir.normalize();
+    const perp = new THREE.Vector3().crossVectors(dir, up);
+    (perp.lengthSq() < 1e-8 ? perp.set(1, 0, 0) : perp.normalize());
+    perp.multiplyScalar(largura / 2);
+    const a0 = new THREE.Vector3().addVectors(p0, perp);
+    const b0 = new THREE.Vector3().subVectors(p0, perp);
+    const a1 = new THREE.Vector3().addVectors(p1, perp);
+    const b1 = new THREE.Vector3().subVectors(p1, perp);
+    posArray.push(a0.x, a0.y, a0.z, b0.x, b0.y, b0.z, a1.x, a1.y, a1.z);
+    posArray.push(b0.x, b0.y, b0.z, b1.x, b1.y, b1.z, a1.x, a1.y, a1.z);
+  }
+  if (posArray.length === 0) return null;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(posArray, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
 function desenharTrilha(hex) {
   removerTrilha();
-  const pontos = trilhaCompleta(hex);
-  if (pontos.length < 2) return;
-  const geo = new THREE.BufferGeometry().setFromPoints(pontos);
-  const mat = new THREE.LineBasicMaterial({ color: 0x4fc3f7 });
-  trailLine = new THREE.Line(geo, mat);
+  const geo = construirGeometriaFita(trilhaCompleta(hex), tamAeronaveAtual * 0.35);
+  if (!geo) return;
+  const mat = new THREE.MeshBasicMaterial({ color: 0x4fc3f7, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false });
+  trailLine = new THREE.Mesh(geo, mat);
+  trailLine.renderOrder = 500;
   scene.add(trailLine);
 }
 
 function removerTrilha() {
-  if (trailLine) { scene.remove(trailLine); trailLine = null; }
+  if (trailLine) {
+    scene.remove(trailLine);
+    trailLine.geometry.dispose();
+    trailLine.material.dispose();
+    trailLine = null;
+  }
+}
+
+function atualizarFitaAeronave(hex, cor) {
+  const geo = construirGeometriaFita(trilhaCompleta(hex), tamAeronaveAtual * 0.35);
+  let mesh = fitasTodasAeronaves.get(hex);
+  if (!geo) { if (mesh) removerFitaAeronave(hex); return; }
+  if (mesh) {
+    mesh.geometry.dispose();
+    mesh.geometry = geo;
+    mesh.material.color.setHex(cor);
+  } else {
+    const mat = new THREE.MeshBasicMaterial({ color: cor, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false });
+    mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = 500;
+    scene.add(mesh);
+    fitasTodasAeronaves.set(hex, mesh);
+  }
+}
+
+function removerFitaAeronave(hex) {
+  const mesh = fitasTodasAeronaves.get(hex);
+  if (!mesh) return;
+  scene.remove(mesh);
+  mesh.geometry.dispose();
+  mesh.material.dispose();
+  fitasTodasAeronaves.delete(hex);
+}
+
+function limparFitasTodasAeronaves() {
+  Array.from(fitasTodasAeronaves.keys()).forEach(removerFitaAeronave);
+}
+
+function alternarTodasTrilhas() {
+  mostrarTodasTrilhas = !mostrarTodasTrilhas;
+  document.getElementById('btn-trilhas-todas').classList.toggle('ativo', mostrarTodasTrilhas);
+  if (!mostrarTodasTrilhas) limparFitasTodasAeronaves();
 }
 
 function fecharSelecao() {
@@ -1440,10 +1629,14 @@ function fecharSelecao() {
   mostrarTrilha = false;
   removerTrilha();
   pararSeguir();
+  // sem aeronave selecionada, o centro de rotação volta a ser o aeroporto/ponto escolhido
+  controls.target.set(0, 0, 0);
 }
 
 document.getElementById('r3d-seguir-cancelar').addEventListener('click', pararSeguir);
 document.getElementById('painel-fechar').addEventListener('click', fecharSelecao);
+document.getElementById('btn-rotulos-aeronaves').addEventListener('click', alternarRotulosAeronaves);
+document.getElementById('btn-trilhas-todas').addEventListener('click', alternarTodasTrilhas);
 
 document.getElementById('btn-voltar').addEventListener('click', () => {
   clearInterval(pollTimer);
@@ -1451,6 +1644,12 @@ document.getElementById('btn-voltar').addEventListener('click', () => {
   window.removeEventListener('resize', aoRedimensionar);
   if (renderer) { renderer.dispose(); renderer.domElement.remove(); }
   fecharSelecao();
+  limparRotulosAeronaves();
+  mostrarRotulosAeronaves = false;
+  document.getElementById('btn-rotulos-aeronaves').classList.remove('ativo');
+  limparFitasTodasAeronaves();
+  mostrarTodasTrilhas = false;
+  document.getElementById('btn-trilhas-todas').classList.remove('ativo');
   centroAtivo = null;
   tamAeronaveAtual = null;
   aircraftData.clear();
