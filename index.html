@@ -1542,8 +1542,16 @@ function trilhaCompleta(hex) {
 
 // gera uma "fita" (faixa horizontal com largura) ao longo dos pontos da trilha, em vez de
 // uma linha fina de 1px — fica bem mais visível a qualquer distância/ângulo de câmera.
-function construirGeometriaFita(pontos, largura) {
-  if (!pontos || pontos.length < 2) return null;
+function construirGeometriaFita(pontosBrutos, largura) {
+  if (!pontosBrutos || pontosBrutos.length < 2) return null;
+  // suaviza com uma curva (centripetal evita loops/bicos com pontos espaçados de forma
+  // irregular, como os da trilha real) — aviões não fazem curva em ângulo reto, e pontos
+  // de polling no tempo criam "cotovelos" artificiais se ligados em linha reta
+  let pontos = pontosBrutos;
+  if (pontosBrutos.length >= 3) {
+    const curva = new THREE.CatmullRomCurve3(pontosBrutos, false, 'centripetal');
+    pontos = curva.getPoints(Math.min(Math.max(pontosBrutos.length * 4, 40), 1500));
+  }
   const up = new THREE.Vector3(0, 1, 0);
   const posArray = [];
   for (let i = 0; i < pontos.length - 1; i++) {
