@@ -22,6 +22,10 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; overflow
   backdrop-filter: blur(4px);
 }
 #info-bar .badge { color: #f2c94c; font-weight: bold; }
+#info-bar button {
+  background: #222; color: #fff; border: 1px solid #555; border-radius: 6px;
+  padding: 4px 10px; font-size: 12px; cursor: pointer;
+}
 .legend {
   position: absolute; bottom: 30px; right: 10px;
   z-index: 1000; background: rgba(0,0,0,.7); color: #fff;
@@ -167,6 +171,7 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; overflow
   <span>🛰️ <span class="badge" id="total">0</span> aeronaves</span>
   <span>📍 <span class="badge" id="com-posicao">0</span> com posição</span>
   <span>🔄 <span class="badge" id="ultima-atualizacao">—</span></span>
+  <button id="btn-modo-3d">🌐 Modo 3D</button>
 </div>
 
 <div id="map"></div>
@@ -178,7 +183,7 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; overflow
   <button id="modo3d-cancelar">✕ Cancelar</button>
 </div>
 
-<div id="footer">Dados: <a href="https://trafegoaereo.com.br" target="_blank" rel="noopener">trafegoaereo.com.br</a> via <a href="https://github.com/wiedehopf/tar1090" target="_blank" rel="noopener">tar1090</a> / <a href="https://github.com/adsbxchange/readsb" target="_blank" rel="noopener">readsb</a><span id="footer-3d-credit" style="display:none"> · Modelo 3D: <a href="https://poly.pizza/m/8ciDd9k8wha" target="_blank" rel="noopener">"Airplane" via Poly Pizza (CC-BY 3.0)</a></span> · <a href="#" id="btn-modo-3d">🌐 Modo 3D</a></div>
+<div id="footer">Dados: <a href="https://trafegoaereo.com.br" target="_blank" rel="noopener">trafegoaereo.com.br</a> via <a href="https://github.com/wiedehopf/tar1090" target="_blank" rel="noopener">tar1090</a> / <a href="https://github.com/adsbxchange/readsb" target="_blank" rel="noopener">readsb</a><span id="footer-3d-credit" style="display:none"> · Modelo 3D: <a href="https://poly.pizza/m/8ciDd9k8wha" target="_blank" rel="noopener">"Airplane" via Poly Pizza (CC-BY 3.0)</a></span></div>
 
 <div id="seguir-bar">🛰 <span id="seguir-callsign"></span> <button id="seguir-cancelar" title="Parar de seguir">✕</button></div>
 
@@ -767,10 +772,7 @@ function cancelarModo3D() {
   limparSelecao3D();
 }
 
-document.getElementById('btn-modo-3d').addEventListener('click', (e) => {
-  e.preventDefault();
-  ativarModo3D();
-});
+document.getElementById('btn-modo-3d').addEventListener('click', ativarModo3D);
 document.getElementById('modo3d-cancelar').addEventListener('click', cancelarModo3D);
 
 document.getElementById('modo3d-entrar').addEventListener('click', () => {
