@@ -779,9 +779,27 @@ function atualizarCirculoRaio3D() {
   }).addTo(map);
 }
 
+// pontos customizados (clique livre no mapa) não têm elevação própria conhecida —
+// sem uma fonte de elevação de terreno (DEM) real, herdamos a elevação do aeroporto
+// conhecido mais próximo dentro desse raio, senão a aeronave "flutua" muito acima do
+// chão perto de qualquer aeroporto que não seja o clique exato no ícone dele.
+const RAIO_ELEVACAO_REF_KM = 30;
+
 function definirCentro3D(lat, lon, nome, pistas, elevacaoFt) {
-  centroSelecionado = { lat, lon, nome, pistas: pistas || null, elevacaoFt: elevacaoFt || 0 };
-  document.getElementById('modo3d-centro-nome').textContent = nome;
+  let elevacaoFinal = elevacaoFt;
+  let refElevacao = null; // sigla do aeroporto usado como referência, se for o caso
+  if (elevacaoFinal == null) {
+    let melhor = null;
+    Object.keys(airportsMap).forEach(icao => {
+      const ap = airportsMap[icao];
+      const d = distKm(lat, lon, ap.lat, ap.lon);
+      if (d <= RAIO_ELEVACAO_REF_KM && (!melhor || d < melhor.dist)) melhor = { dist: d, elev: ap.elev, icao };
+    });
+    elevacaoFinal = melhor ? melhor.elev : 0;
+    refElevacao = melhor ? melhor.icao : null;
+  }
+  centroSelecionado = { lat, lon, nome, pistas: pistas || null, elevacaoFt: elevacaoFinal };
+  document.getElementById('modo3d-centro-nome').textContent = nome + (refElevacao ? ` (elevação ref.: ${refElevacao}, ${elevacaoFinal} pés)` : '');
   document.getElementById('modo3d-entrar').disabled = false;
   if (marcadorCentro3D) map.removeLayer(marcadorCentro3D);
   marcadorCentro3D = L.marker([lat, lon], {
