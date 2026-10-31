@@ -1295,7 +1295,9 @@ function aplicarRelevoNaGeometria(geo, gradeElevacao, center) {
   const elevacaoCentroM = (center.elevacaoFt || 0) * 0.3048;
   for (let i = 0; i < pos.count; i++) {
     const u = pos.getX(i) / geo.parameters.width + 0.5;
-    const v = pos.getY(i) / geo.parameters.height + 0.5;
+    // Y local positivo = norte, mas a linha 0 da imagem de elevação é a borda NORTE —
+    // sem inverter, o relevo saía espelhado norte-sul em relação à imagem de satélite
+    const v = 0.5 - pos.getY(i) / geo.parameters.height;
     const elevM = amostrarElevacao(gradeElevacao, u, v);
     pos.setZ(i, ((elevM - elevacaoCentroM) / 1000) * RELEVO_EXAGERO);
   }
@@ -1303,18 +1305,40 @@ function aplicarRelevoNaGeometria(geo, gradeElevacao, center) {
   geo.computeVertexNormals();
 }
 
-// altura real do terreno (relevo 3D) no ponto (x,z) do mundo, no mesmo referencial da
-// pista/aeronaves (relativo à elevação do centro escolhido) — usada pra "grudar" a pista
-// no relevo de verdade em vez de ficar numa altura fixa, que o relevo real podia cobrir.
-function alturaRelevoEm(x, z, gradeTiles, gradeElevacao, center) {
-  const u = (x - gradeTiles.offsetXM) / gradeTiles.larguraM + 0.5;
-  const v = (gradeTiles.offsetZM - z) / gradeTiles.alturaM + 0.5;
-  const elevM = amostrarElevacao(gradeElevacao, u, v);
-  const elevacaoCentroM = (center.elevacaoFt || 0) * 0.3048;
-  return ((elevM - elevacaoCentroM) / 1000) * RELEVO_EXAGERO;
+function distPontoSegmento(px, pz, ax, az, bx, bz) {
+  const dx = bx - ax, dz = bz - az;
+  const len2 = dx * dx + dz * dz;
+  const t = len2 > 0 ? Math.min(Math.max(((px - ax) * dx + (pz - az) * dz) / len2, 0), 1) : 0;
+  return Math.hypot(px - (ax + t * dx), pz - (az + t * dz));
 }
 
-function adicionarPista(pista, center, gradeTiles, gradeElevacao) {
+// aplaina o relevo em volta das pistas na altura do campo (y=0), como a terraplenagem de
+// um aeroporto real. A pista é uma placa plana e a malha do terreno é grossa (células de
+// km) com exagero vertical — sem isso, o relevo ao longo da pista cobria parte dela.
+// A zona plana cobre 1.5 célula (todo triângulo que toca a pista fica com os 3 vértices
+// aplainados) e uma faixa de transição suave de mais 1.5 célula evita "degraus".
+function aplainarRelevoNasPistas(geo, gradeTiles, pistas, center) {
+  const celula = Math.max(gradeTiles.larguraM, gradeTiles.alturaM) / RELEVO_SEGMENTOS;
+  const raioPlano = celula * 1.5, faixaTransicao = celula * 1.5;
+  const segmentos = pistas.map(p => {
+    const a = paraLocal(p.la, p.lo, 0, center), b = paraLocal(p.ha, p.ho, 0, center);
+    return [a.x, a.z, b.x, b.z];
+  });
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    // local -> mundo: o plano é girado -90° em X (Y local = -Z do mundo) e deslocado pelo offset
+    const wx = pos.getX(i) + gradeTiles.offsetXM;
+    const wz = -pos.getY(i) + gradeTiles.offsetZM;
+    const d = Math.min(...segmentos.map(s => distPontoSegmento(wx, wz, ...s)));
+    if (d >= raioPlano + faixaTransicao) continue;
+    const t = Math.max(d - raioPlano, 0) / faixaTransicao;
+    pos.setZ(i, pos.getZ(i) * t * t * (3 - 2 * t)); // smoothstep: 0 na pista, relevo original fora
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+}
+
+function adicionarPista(pista, center) {
   const p1 = paraLocal(pista.la, pista.lo, 0, center);
   const p2 = paraLocal(pista.ha, pista.ho, 0, center);
   const meio = p1.clone().add(p2).multiplyScalar(0.5);
@@ -1324,9 +1348,9 @@ function adicionarPista(pista, center, gradeTiles, gradeElevacao) {
   const larguraReal = (pista.l || 30) * 0.0003048;
   const largura = Math.max(larguraReal, raioAtivoKm * 0.006);
 
-  const baseY = gradeElevacao
-    ? alturaRelevoEm(meio.x, meio.z, gradeTiles, gradeElevacao, center) + 0.004
-    : 0.002;
+  // com relevo real, o terreno em volta da pista já foi aplainado em y=0 (ver
+  // aplainarRelevoNasPistas), então a altura fixa vale nos dois casos
+  const baseY = 0.002;
 
   const geo = new THREE.BoxGeometry(largura, 0.004, comprimento);
   const mat = new THREE.MeshBasicMaterial({ color: 0xf5f5f5, fog: false });
@@ -1481,16 +1505,18 @@ function iniciarCena3D(centro, raioKm) {
     terreno.geometry = gradeElevacao
       ? new THREE.PlaneGeometry(gradeTiles.larguraM, gradeTiles.alturaM, RELEVO_SEGMENTOS, RELEVO_SEGMENTOS)
       : new THREE.PlaneGeometry(gradeTiles.larguraM, gradeTiles.alturaM);
-    if (gradeElevacao) aplicarRelevoNaGeometria(terreno.geometry, gradeElevacao, centro);
+    if (gradeElevacao) {
+      aplicarRelevoNaGeometria(terreno.geometry, gradeElevacao, centro);
+      if (centro.pistas && centro.pistas.length) aplainarRelevoNasPistas(terreno.geometry, gradeTiles, centro.pistas, centro);
+    }
     terreno.material.dispose();
     terreno.material = new THREE.MeshLambertMaterial({ map: texture });
     terreno.position.set(gradeTiles.offsetXM, -0.001, gradeTiles.offsetZM);
 
     // pista(s) reais do aeroporto, se o centro escolhido tiver dados de runway — desenhada
-    // só agora (depois do relevo pronto) pra "grudar" na altura real do terreno ali; com
-    // altura fixa, o relevo real às vezes ficava mais alto que a pista e a cobria por cima.
+    // só agora, junto com o terreno (já aplainado em volta delas, se houver relevo)
     if (centro.pistas && centro.pistas.length) {
-      centro.pistas.forEach(p => adicionarPista(p, centro, gradeTiles, gradeElevacao));
+      centro.pistas.forEach(p => adicionarPista(p, centro));
     }
   });
 
