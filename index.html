@@ -1023,10 +1023,11 @@ function criarRotuloAeronave(linhas) {
 }
 
 function textoRotuloAeronave(a) {
+  const callsign = a.flight ? a.flight.trim() : a.hex;
   const alt = a.alt_baro === 'ground' ? 'Solo' : (a.alt_baro != null ? Math.round(Number(a.alt_baro)).toLocaleString() + ' ft' : '— ft');
   const gs = a.gs != null ? Math.round(a.gs) + ' kn' : '— kn';
   const track = a.track != null ? Math.round(a.track) + '°' : '—°';
-  return [alt, gs, track];
+  return [callsign, alt, gs, track];
 }
 
 function atualizarRotuloAeronave(hex, a) {
