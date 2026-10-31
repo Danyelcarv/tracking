@@ -217,7 +217,6 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; overflow
     <span>📏 raio <b id="raio-ativo">—</b> km</span>
     <button id="btn-rotulos-aeronaves" title="Mostrar altitude, velocidade e rumo em cada aeronave">🏷️ Rótulos</button>
     <button id="btn-trilhas-todas" title="Mostrar a trilha de todas as aeronaves">〰 Trilhas</button>
-    <button id="btn-minha-localizacao" title="Mostrar minha localização atual">📍 Minha localização</button>
   </div>
   <div id="r3d-seguir-bar">🛰 <span id="r3d-seguir-callsign"></span> <button id="r3d-seguir-cancelar" title="Parar de seguir">✕</button></div>
   <div id="bussola"><div id="bussola-fita"></div><div id="bussola-ponteiro"></div></div>
@@ -832,8 +831,9 @@ let trailLine = null;
 let mostrarTodasTrilhas = false;
 let fitasTodasAeronaves = new Map(); // hex -> Mesh (fita de trilha de cada aeronave)
 let miniMapa3D = null; // instância Leaflet não-interativa de referência, dentro da cena 3D
+let miniMapaMarcadores = new Map(); // hex -> L.circleMarker (tracking ao vivo das aeronaves no mini-mapa)
 let miniMapaMarcadorEu = null; // marcador "minha localização" no mini-mapa
-let marcadorMinhaLocalizacao = null; // { linha, sprite } na cena 3D, se ativo
+let marcadorMinhaLocalizacao = null; // { linha, sprite } na cena 3D, se o usuário estiver perto do centro escolhido
 let centroAtivo = null;
 let raioAtivoKm = 60;
 let pointerDownPos = null;
@@ -1219,6 +1219,7 @@ function atualizarBussola() {
 // mesma área que a própria cena 3D já renderiza.
 function montarMiniMapa3D(centro, raioKm) {
   if (miniMapa3D) { miniMapa3D.remove(); miniMapa3D = null; }
+  miniMapaMarcadores.clear();
   miniMapaMarcadorEu = null;
   miniMapa3D = L.map('mini-mapa-3d', {
     zoomControl: false, attributionControl: false, dragging: false,
@@ -1227,8 +1228,8 @@ function montarMiniMapa3D(centro, raioKm) {
   });
   const temaSalvo = localStorage.getItem('tema');
   L.tileLayer(temaURLs[temaSalvo] || temaURLs['🌗 OpenStreetMap'], { maxZoom: 19 }).addTo(miniMapa3D);
-  L.circleMarker([centro.lat, centro.lon], { radius: 5, color: '#fff', weight: 1, fillColor: '#2ecc71', fillOpacity: 1 }).addTo(miniMapa3D);
-  L.circle([centro.lat, centro.lon], { radius: raioKm * 1000, color: '#4fc3f7', weight: 1, fillOpacity: 0.05 }).addTo(miniMapa3D);
+  L.circleMarker([centro.lat, centro.lon], { radius: 5, color: '#fff', weight: 1, fillColor: '#2ecc71', fillOpacity: 1, interactive: false }).addTo(miniMapa3D);
+  L.circle([centro.lat, centro.lon], { radius: raioKm * 1000, color: '#4fc3f7', weight: 1, fillOpacity: 0.05, interactive: false }).addTo(miniMapa3D);
   const zoom = Math.max((ZOOM_POR_RAIO[raioKm] || 9) - 2, 4);
   miniMapa3D.setView([centro.lat, centro.lon], zoom);
   // o container ficava display:none até entrar no modo 3D — sem invalidateSize o
@@ -1236,32 +1237,26 @@ function montarMiniMapa3D(centro, raioKm) {
   setTimeout(() => { if (miniMapa3D) miniMapa3D.invalidateSize(); }, 80);
 }
 
-function alternarMinhaLocalizacao() {
-  const btn = document.getElementById('btn-minha-localizacao');
-  if (marcadorMinhaLocalizacao) {
-    removerMarcadorReferencia(marcadorMinhaLocalizacao);
-    marcadorMinhaLocalizacao = null;
-    if (miniMapaMarcadorEu) { miniMapa3D.removeLayer(miniMapaMarcadorEu); miniMapaMarcadorEu = null; }
-    btn.classList.remove('ativo');
-    return;
-  }
+// pede a localização automaticamente ao entrar na cena (sem botão — um botão não ajuda
+// muito quando quase sempre estamos vendo um ponto longe de onde estamos de verdade).
+// Só desenha o marcador se o usuário estiver dentro do raio escolhido, pra não poluir
+// a cena com algo fora de contexto quando o centro escolhido é longe.
+function detectarMinhaLocalizacao(centro, raioKm) {
+  if (!navigator.geolocation) return;
   navigator.geolocation.getCurrentPosition(
     pos => {
-      if (!centroAtivo) return; // já saiu da cena 3D enquanto esperava a permissão
+      if (centroAtivo !== centro) return; // já saiu/trocou de cena enquanto esperava a permissão
       const { latitude, longitude } = pos.coords;
-      const local = paraLocal(latitude, longitude, 0, centroAtivo);
+      if (distKm(centro.lat, centro.lon, latitude, longitude) > raioKm) return; // longe demais, ignora
+      const local = paraLocal(latitude, longitude, 0, centro);
       marcadorMinhaLocalizacao = adicionarMarcadorReferencia(local, '📍 Você', 'rgba(40,80,170,0.9)');
       if (miniMapa3D) {
-        miniMapaMarcadorEu = L.circleMarker([latitude, longitude], { radius: 5, color: '#fff', weight: 1, fillColor: '#2f7fd6', fillOpacity: 1 }).addTo(miniMapa3D);
+        miniMapaMarcadorEu = L.circleMarker([latitude, longitude], { radius: 5, color: '#fff', weight: 1, fillColor: '#2f7fd6', fillOpacity: 1, interactive: false }).addTo(miniMapa3D);
       }
-      btn.classList.add('ativo');
     },
     err => console.warn('Geolocalização indisponível:', err.message),
     { enableHighAccuracy: false, timeout: 8000 }
   );
-}
-if (!navigator.geolocation) {
-  document.getElementById('btn-minha-localizacao').style.display = 'none';
 }
 
 function iniciarCena3D(centro, raioKm) {
@@ -1386,6 +1381,7 @@ function iniciarCena3D(centro, raioKm) {
   atualizarDados3D();
   pollTimer = setInterval(atualizarDados3D, POLL_MS);
   carregarHistorico(centro);
+  detectarMinhaLocalizacao(centro, raioKm);
 }
 
 // Reconstrói a trilha completa (até ~1h) a partir dos "chunks" de histórico que o
@@ -1487,6 +1483,20 @@ async function atualizarDados3D() {
       contagem[categoria][cor]++;
       vistosAgora.add(a.hex);
 
+      // mini-mapa 2D de referência também mostra o tracking ao vivo das aeronaves
+      // (não só o mapa-base), colorido igual à cena 3D
+      if (miniMapa3D) {
+        const corHex = '#' + CORES[cor].toString(16).padStart(6, '0');
+        let marcadorMini = miniMapaMarcadores.get(a.hex);
+        if (!marcadorMini) {
+          marcadorMini = L.circleMarker([a.lat, a.lon], { radius: 3, weight: 0, color: corHex, fillColor: corHex, fillOpacity: 1, interactive: false }).addTo(miniMapa3D);
+          miniMapaMarcadores.set(a.hex, marcadorMini);
+        } else {
+          marcadorMini.setLatLng([a.lat, a.lon]);
+          marcadorMini.setStyle({ color: corHex, fillColor: corHex });
+        }
+      }
+
       aircraftData.set(a.hex, {
         hex: a.hex, flight: a.flight, alt_baro: a.alt_baro, gs: a.gs, track: a.track,
         type: a.type, category: a.category, lat: a.lat, lon: a.lon, pos, modelo,
@@ -1513,6 +1523,12 @@ async function atualizarDados3D() {
     if (mostrarTodasTrilhas) {
       vistosAgora.forEach(hex => atualizarFitaAeronave(hex, CORES[altBucket(aircraftData.get(hex))]));
       Array.from(fitasTodasAeronaves.keys()).forEach(hex => { if (!vistosAgora.has(hex)) removerFitaAeronave(hex); });
+    }
+
+    if (miniMapa3D) {
+      Array.from(miniMapaMarcadores.keys()).forEach(hex => {
+        if (!vistosAgora.has(hex)) { miniMapa3D.removeLayer(miniMapaMarcadores.get(hex)); miniMapaMarcadores.delete(hex); }
+      });
     }
 
     if (hexSelecionado) {
@@ -1758,7 +1774,6 @@ document.getElementById('r3d-seguir-cancelar').addEventListener('click', pararSe
 document.getElementById('painel-fechar').addEventListener('click', fecharSelecao);
 document.getElementById('btn-rotulos-aeronaves').addEventListener('click', alternarRotulosAeronaves);
 document.getElementById('btn-trilhas-todas').addEventListener('click', alternarTodasTrilhas);
-document.getElementById('btn-minha-localizacao').addEventListener('click', alternarMinhaLocalizacao);
 
 document.getElementById('btn-voltar').addEventListener('click', () => {
   clearInterval(pollTimer);
@@ -1773,8 +1788,8 @@ document.getElementById('btn-voltar').addEventListener('click', () => {
   mostrarTodasTrilhas = false;
   document.getElementById('btn-trilhas-todas').classList.remove('ativo');
   if (marcadorMinhaLocalizacao) { removerMarcadorReferencia(marcadorMinhaLocalizacao); marcadorMinhaLocalizacao = null; }
-  document.getElementById('btn-minha-localizacao').classList.remove('ativo');
   if (miniMapa3D) { miniMapa3D.remove(); miniMapa3D = null; }
+  miniMapaMarcadores.clear();
   miniMapaMarcadorEu = null;
   centroAtivo = null;
   tamAeronaveAtual = null;
