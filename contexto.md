@@ -88,11 +88,12 @@ Os dois fluxos (2D e 3D) compartilham o mesmo `<script>`, então nomes que exist
 5. **"Gaiola" branca ao redor da aeronave selecionada**: era um `marcadorSelecao` wireframe de destaque. Removido — o destaque hoje é só o painel lateral + trilha.
 6. **Asas do modelo 3D "sumindo" ou distorcendo** (o mais sutil): não era bug de orientação/categoria, era **z-fighting por alcance dinâmico de profundidade excessivo** da câmera (near muito pequeno vs. far de até centenas de km). Corrigido habilitando `logarithmicDepthBuffer: true` no `WebGLRenderer`, combinado com a mudança de unidades da cena de metros para quilômetros (reduz a magnitude das coordenadas, ajuda a precisão geral do float32 do WebGL).
 7. **Condição de corrida no carregamento assíncrono do modelo**: se a cena 3D era aberta antes do `.glb` terminar de baixar, ficava presa no fallback procedural para sempre. Corrigido: ao terminar de carregar, o modelo é aplicado retroativamente na cena já aberta (`aplicarModeloAviaoNaCenaAtual`).
+8. **Aeronave "flutuando" acima da pista em ponto customizado perto de um aeroporto**: ao clicar em qualquer ponto do mapa que não fosse exatamente o ícone do aeroporto, `elevacaoFt` caía pro padrão 0 (nível do mar) — perto de um aeroporto como SBBR (elevação ~3500 pés), a aeronave aparecia flutuando bem acima do chão. Corrigido em `definirCentro3D`: pontos customizados sem elevação própria agora herdam a elevação do aeroporto conhecido mais próximo dentro de `RAIO_ELEVACAO_REF_KM` (30km); sem aeroporto por perto, cai pra 0 como antes.
 
 ## Decisões de escopo (perguntas já respondidas)
 
 - **Trilha histórica**: o feed do tar1090 usado não expõe endpoint de trace por aeronave (`trace_full_*.json` retorna 404) — só os "chunks" periódicos de snapshot de todas as aeronaves, com até ~1h de cobertura. Não há fonte gratuita de histórico mais longo sem mudar de provedor.
-- **Elevação de terreno em ponto customizado**: só aeroportos da lista (`airports.json`) têm elevação conhecida; um ponto clicado livremente no mini-mapa assume elevação 0 (sem fonte de DEM integrada).
+- **Elevação de terreno em ponto customizado**: não há fonte de elevação de terreno (DEM) real integrada. Pontos customizados herdam a elevação do aeroporto conhecido mais próximo (até 30km, ver bug #8 acima); sem nenhum aeroporto por perto, assume nível do mar.
 - **Modelos 3D por tipo específico** (A320 vs 737 vs ATR...): não há biblioteca gratuita, leve e confiável com modelos por fabricante/tipo. Optou-se por um único modelo genérico de jato para todas as aeronaves.
 
 ## Git
