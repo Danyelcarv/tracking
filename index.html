@@ -728,6 +728,7 @@ let aeroportosLayer = null;
 let centroSelecionado = null; // { lat, lon, nome, pistas, elevacaoFt }
 let raioSelecionado = 60;
 let marcadorCentro3D = null;
+let circuloRaio3D = null; // buffer mostrando até onde o raio escolhido alcança, no mapa 2D de seleção
 
 function montarCamadaAeroportos() {
   const camada = L.layerGroup();
@@ -763,9 +764,20 @@ RAIOS.forEach(km => {
     raioSelecionado = km;
     [...raiosDiv3D.children].forEach(b => b.classList.remove('ativo'));
     btn.classList.add('ativo');
+    atualizarCirculoRaio3D();
   });
   raiosDiv3D.appendChild(btn);
 });
+
+// buffer (círculo) ao redor do ponto/aeroporto escolhido mostrando até onde o raio
+// selecionado alcança, pra dar uma ideia da área antes mesmo de entrar na cena 3D
+function atualizarCirculoRaio3D() {
+  if (!centroSelecionado) return;
+  if (circuloRaio3D) map.removeLayer(circuloRaio3D);
+  circuloRaio3D = L.circle([centroSelecionado.lat, centroSelecionado.lon], {
+    radius: raioSelecionado * 1000, color: '#4fc3f7', weight: 2, fillOpacity: 0.08, interactive: false,
+  }).addTo(map);
+}
 
 function definirCentro3D(lat, lon, nome, pistas, elevacaoFt) {
   centroSelecionado = { lat, lon, nome, pistas: pistas || null, elevacaoFt: elevacaoFt || 0 };
@@ -778,11 +790,13 @@ function definirCentro3D(lat, lon, nome, pistas, elevacaoFt) {
       className: '', iconSize: [20, 20], iconAnchor: [10, 10]
     })
   }).addTo(map);
+  atualizarCirculoRaio3D();
 }
 
 function limparSelecao3D() {
   if (aeroportosLayer) map.removeLayer(aeroportosLayer);
   if (marcadorCentro3D) { map.removeLayer(marcadorCentro3D); marcadorCentro3D = null; }
+  if (circuloRaio3D) { map.removeLayer(circuloRaio3D); circuloRaio3D = null; }
   document.getElementById('modo3d-painel').style.display = 'none';
   map.getContainer().style.cursor = '';
 }
