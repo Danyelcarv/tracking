@@ -163,6 +163,12 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; overflow
   padding: 6px 10px; font-size: 12px; cursor: pointer;
 }
 #painel-conteudo .acoes button.ativo { background: #4fc3f7; color: #000; border-color: #4fc3f7; }
+#mini-mapa-3d {
+  position: absolute; bottom: 10px; left: 10px; z-index: 1000;
+  width: 190px; height: 150px; border-radius: 8px; overflow: hidden;
+  border: 1px solid #555; box-shadow: 0 2px 10px rgba(0,0,0,.6);
+}
+#mini-mapa-3d .leaflet-control-container { display: none; }
 </style>
 </head>
 <body>
@@ -211,9 +217,11 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; overflow
     <span>📏 raio <b id="raio-ativo">—</b> km</span>
     <button id="btn-rotulos-aeronaves" title="Mostrar altitude, velocidade e rumo em cada aeronave">🏷️ Rótulos</button>
     <button id="btn-trilhas-todas" title="Mostrar a trilha de todas as aeronaves">〰 Trilhas</button>
+    <button id="btn-minha-localizacao" title="Mostrar minha localização atual">📍 Minha localização</button>
   </div>
   <div id="r3d-seguir-bar">🛰 <span id="r3d-seguir-callsign"></span> <button id="r3d-seguir-cancelar" title="Parar de seguir">✕</button></div>
   <div id="bussola"><div id="bussola-fita"></div><div id="bussola-ponteiro"></div></div>
+  <div id="mini-mapa-3d"></div>
   <div id="painel-detalhe">
     <button id="painel-fechar" title="Fechar">✕</button>
     <div id="painel-conteudo"></div>
@@ -251,6 +259,16 @@ const temaSalvo = localStorage.getItem('tema');
 (temas[temaSalvo] || temas['🌗 OpenStreetMap']).addTo(map);
 const layerControl = L.control.layers(temas, null, { position: 'topright' }).addTo(map);
 map.on('baselayerchange', e => localStorage.setItem('tema', e.name));
+
+// mesmas URLs de 'temas' acima, só que como string — usado pelo mini-mapa de
+// referência da cena 3D, que precisa de uma instância Leaflet própria (não dá
+// pra reaproveitar os objetos L.tileLayer de 'temas', já presos ao mapa principal)
+const temaURLs = {
+  '🌗 OpenStreetMap': 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  '🌑 Esri Cinza Escuro': 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+  '🌓 Esri Cinza Claro': 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+  '🛰️ Satélite Esri': 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+};
 
 let aircraftMap = null;
 let airportsMap = {};
@@ -813,6 +831,9 @@ let mostrarTrilha = false;
 let trailLine = null;
 let mostrarTodasTrilhas = false;
 let fitasTodasAeronaves = new Map(); // hex -> Mesh (fita de trilha de cada aeronave)
+let miniMapa3D = null; // instância Leaflet não-interativa de referência, dentro da cena 3D
+let miniMapaMarcadorEu = null; // marcador "minha localização" no mini-mapa
+let marcadorMinhaLocalizacao = null; // { linha, sprite } na cena 3D, se ativo
 let centroAtivo = null;
 let raioAtivoKm = 60;
 let pointerDownPos = null;
@@ -920,6 +941,40 @@ function criarRotuloTexto(texto, corFundo, corTexto) {
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthTest: false }));
   sprite.renderOrder = 999;
   return { sprite, aspecto: largura / altura };
+}
+
+// marcador de referência "estilo carta aeronáutica": linha vertical do chão até um
+// rótulo de texto, sem nenhum objeto 3D chamativo (cone/pino) — usado pro centro
+// escolhido, pros aeroportos próximos (sempre visíveis) e pra "minha localização".
+// Retorna {linha, sprite} pra quem precisar remover depois (ex. localização, que liga/desliga).
+function adicionarMarcadorReferencia(posLocal, texto, corFundo) {
+  const baseRotulo = tamAeronaveAtual * 4;
+  const linhaGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(posLocal.x, 0.002, posLocal.z),
+    new THREE.Vector3(posLocal.x, baseRotulo, posLocal.z),
+  ]);
+  const linhaMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, depthTest: false });
+  const linha = new THREE.Line(linhaGeo, linhaMat);
+  linha.renderOrder = 998;
+  scene.add(linha);
+
+  const { sprite, aspecto } = criarRotuloTexto(texto, corFundo, '#ffffff');
+  const alturaRotulo = tamAeronaveAtual * 1.3;
+  sprite.scale.set(alturaRotulo * aspecto, alturaRotulo, 1);
+  sprite.position.set(posLocal.x, baseRotulo + alturaRotulo * 0.5, posLocal.z);
+  scene.add(sprite);
+
+  return { linha, sprite };
+}
+
+function removerMarcadorReferencia(marcador) {
+  if (!marcador) return;
+  scene.remove(marcador.linha);
+  marcador.linha.geometry.dispose();
+  marcador.linha.material.dispose();
+  scene.remove(marcador.sprite);
+  marcador.sprite.material.map.dispose();
+  marcador.sprite.material.dispose();
 }
 
 // rótulo compacto de 3 linhas (altitude/velocidade/rumo) usado sobre cada aeronave
@@ -1158,8 +1213,60 @@ function atualizarBussola() {
   fita.style.transform = `translateX(${offset}px)`;
 }
 
+// mini-mapa 2D de referência dentro da cena 3D: só pra situar geograficamente o ponto
+// escolhido, sem interação nenhuma (não dá pra arrastar/zoom) — por isso o zoom é mais
+// aberto que o equivalente 2D, pra mostrar o contexto ao redor em vez de repetir a
+// mesma área que a própria cena 3D já renderiza.
+function montarMiniMapa3D(centro, raioKm) {
+  if (miniMapa3D) { miniMapa3D.remove(); miniMapa3D = null; }
+  miniMapaMarcadorEu = null;
+  miniMapa3D = L.map('mini-mapa-3d', {
+    zoomControl: false, attributionControl: false, dragging: false,
+    scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false,
+    keyboard: false, touchZoom: false, tap: false,
+  });
+  const temaSalvo = localStorage.getItem('tema');
+  L.tileLayer(temaURLs[temaSalvo] || temaURLs['🌗 OpenStreetMap'], { maxZoom: 19 }).addTo(miniMapa3D);
+  L.circleMarker([centro.lat, centro.lon], { radius: 5, color: '#fff', weight: 1, fillColor: '#2ecc71', fillOpacity: 1 }).addTo(miniMapa3D);
+  L.circle([centro.lat, centro.lon], { radius: raioKm * 1000, color: '#4fc3f7', weight: 1, fillOpacity: 0.05 }).addTo(miniMapa3D);
+  const zoom = Math.max((ZOOM_POR_RAIO[raioKm] || 9) - 2, 4);
+  miniMapa3D.setView([centro.lat, centro.lon], zoom);
+  // o container ficava display:none até entrar no modo 3D — sem invalidateSize o
+  // Leaflet calcula o tamanho errado (0x0) e os tiles não aparecem
+  setTimeout(() => { if (miniMapa3D) miniMapa3D.invalidateSize(); }, 80);
+}
+
+function alternarMinhaLocalizacao() {
+  const btn = document.getElementById('btn-minha-localizacao');
+  if (marcadorMinhaLocalizacao) {
+    removerMarcadorReferencia(marcadorMinhaLocalizacao);
+    marcadorMinhaLocalizacao = null;
+    if (miniMapaMarcadorEu) { miniMapa3D.removeLayer(miniMapaMarcadorEu); miniMapaMarcadorEu = null; }
+    btn.classList.remove('ativo');
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      if (!centroAtivo) return; // já saiu da cena 3D enquanto esperava a permissão
+      const { latitude, longitude } = pos.coords;
+      const local = paraLocal(latitude, longitude, 0, centroAtivo);
+      marcadorMinhaLocalizacao = adicionarMarcadorReferencia(local, '📍 Você', 'rgba(40,80,170,0.9)');
+      if (miniMapa3D) {
+        miniMapaMarcadorEu = L.circleMarker([latitude, longitude], { radius: 5, color: '#fff', weight: 1, fillColor: '#2f7fd6', fillOpacity: 1 }).addTo(miniMapa3D);
+      }
+      btn.classList.add('ativo');
+    },
+    err => console.warn('Geolocalização indisponível:', err.message),
+    { enableHighAccuracy: false, timeout: 8000 }
+  );
+}
+if (!navigator.geolocation) {
+  document.getElementById('btn-minha-localizacao').style.display = 'none';
+}
+
 function iniciarCena3D(centro, raioKm) {
   montarBussola();
+  montarMiniMapa3D(centro, raioKm);
   centroAtivo = centro;
   raioAtivoKm = raioKm;
   const raioM = raioKm; // "raioM" = raio em unidades da cena = km (ver nota em paraLocal)
@@ -1238,33 +1345,22 @@ function iniciarCena3D(centro, raioKm) {
     centro.pistas.forEach(p => adicionarPista(p, centro));
   }
 
-  // marcador do centro (aeroporto/ponto)
-  const pinGeo = new THREE.ConeGeometry(tamAeronave * 0.6, tamAeronave * 2, 8);
-  const pinMat = new THREE.MeshLambertMaterial({ color: 0x2ecc71 });
-  const pin = new THREE.Mesh(pinGeo, pinMat);
-  pin.position.set(0, tamAeronave, 0);
-  scene.add(pin);
+  // marcador do centro escolhido: sem cone/pino — só a linha + rótulo "estilo carta",
+  // com a sigla ICAO (se for aeroporto) ou a coordenada simplificada (se for um ponto
+  // customizado). Cor de fundo diferenciada pra se destacar dos aeroportos próximos.
+  const codigoCentro = centro.nome.includes(' — ')
+    ? centro.nome.split(' — ')[0]
+    : `${centro.lat.toFixed(2)}, ${centro.lon.toFixed(2)}`;
+  adicionarMarcadorReferencia(new THREE.Vector3(0, 0, 0), codigoCentro, 'rgba(20,100,40,0.9)');
 
-  // linha a 90° (vertical) + código ICAO do centro, se for um aeroporto (não um ponto customizado)
-  const codigoCentro = centro.nome.includes(' — ') ? centro.nome.split(' — ')[0] : null;
-  if (codigoCentro) {
-    const topoPino = tamAeronave * 2;
-    const baseRotulo = tamAeronave * 4;
-    const linhaGeo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, topoPino, 0),
-      new THREE.Vector3(0, baseRotulo, 0),
-    ]);
-    const linhaMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, depthTest: false });
-    const linha = new THREE.Line(linhaGeo, linhaMat);
-    linha.renderOrder = 998;
-    scene.add(linha);
-
-    const { sprite, aspecto } = criarRotuloTexto(codigoCentro, 'rgba(0,0,0,0.8)', '#ffffff');
-    const alturaRotulo = tamAeronave * 1.3;
-    sprite.scale.set(alturaRotulo * aspecto, alturaRotulo, 1);
-    sprite.position.set(0, baseRotulo + alturaRotulo * 0.5, 0);
-    scene.add(sprite);
-  }
+  // outros aeroportos conhecidos que caem dentro do raio escolhido também ganham
+  // linha + sigla (sempre visíveis, não é algo que o usuário precisa ligar/desligar)
+  Object.keys(airportsMap).forEach(icao => {
+    if (icao === codigoCentro) return; // já é o próprio centro, evita rótulo duplicado
+    const ap = airportsMap[icao];
+    if (distKm(centro.lat, centro.lon, ap.lat, ap.lon) > raioKm) return;
+    adicionarMarcadorReferencia(paraLocal(ap.lat, ap.lon, 0, centro), icao, 'rgba(0,0,0,0.8)');
+  });
 
   // modelo único (real, com fallback procedural) pra todas as aeronaves — nariz sempre
   // aponta para norte/-Z em track 0
@@ -1662,6 +1758,7 @@ document.getElementById('r3d-seguir-cancelar').addEventListener('click', pararSe
 document.getElementById('painel-fechar').addEventListener('click', fecharSelecao);
 document.getElementById('btn-rotulos-aeronaves').addEventListener('click', alternarRotulosAeronaves);
 document.getElementById('btn-trilhas-todas').addEventListener('click', alternarTodasTrilhas);
+document.getElementById('btn-minha-localizacao').addEventListener('click', alternarMinhaLocalizacao);
 
 document.getElementById('btn-voltar').addEventListener('click', () => {
   clearInterval(pollTimer);
@@ -1675,6 +1772,10 @@ document.getElementById('btn-voltar').addEventListener('click', () => {
   limparFitasTodasAeronaves();
   mostrarTodasTrilhas = false;
   document.getElementById('btn-trilhas-todas').classList.remove('ativo');
+  if (marcadorMinhaLocalizacao) { removerMarcadorReferencia(marcadorMinhaLocalizacao); marcadorMinhaLocalizacao = null; }
+  document.getElementById('btn-minha-localizacao').classList.remove('ativo');
+  if (miniMapa3D) { miniMapa3D.remove(); miniMapa3D = null; }
+  miniMapaMarcadorEu = null;
   centroAtivo = null;
   tamAeronaveAtual = null;
   aircraftData.clear();
