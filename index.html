@@ -1141,6 +1141,12 @@ function criarGeometriaAviao(tam) {
 }
 
 // ---- Terreno com imagem de satélite real (tiles Esri, mesma fonte da camada "Satélite Esri") ----
+// + relevo 3D real (elevação de verdade via AWS Terrain Tiles/"Terrarium", dados SRTM,
+// gratuito e sem chave). Pra desligar o relevo e voltar ao terreno plano de antes, se o
+// resultado não ficar bom, basta trocar RELEVO_3D_REAL pra false — nada mais precisa mudar.
+const RELEVO_3D_REAL = true;
+const RELEVO_SEGMENTOS = 56; // resolução da malha do terreno (vértices por lado)
+const RELEVO_EXAGERO = ALT_EXAGERO; // mesmo exagero vertical usado nas aeronaves, por consistência
 const ZOOM_POR_RAIO = { 30: 11, 60: 10, 90: 9, 120: 9, 150: 8 };
 const TILE_SIZE = 256;
 
@@ -1155,7 +1161,10 @@ function tile2lat(y, z) {
   return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
 }
 
-async function construirTerrenoSatelite(center, raioKm) {
+// calcula a grade de tiles (bbox, zoom, dimensões em km) coberta pelo raio escolhido —
+// usada tanto pra buscar a imagem de satélite quanto, se RELEVO_3D_REAL, a elevação,
+// garantindo que as duas fiquem alinhadas pixel-a-pixel (mesmo zoom/x/y).
+function calcularGradeTiles(center, raioKm) {
   const zoom = ZOOM_POR_RAIO[raioKm] || 9;
   const halfSizeKm = raioKm * 1.3;
   const latHalfDeg = halfSizeKm / 110.54;
@@ -1165,8 +1174,24 @@ async function construirTerrenoSatelite(center, raioKm) {
   const xMax = lon2tile(center.lon + lonHalfDeg, zoom);
   const yMin = lat2tile(center.lat + latHalfDeg, zoom);
   const yMax = lat2tile(center.lat - latHalfDeg, zoom);
-  const tilesX = xMax - xMin + 1, tilesY = yMax - yMin + 1;
 
+  // bbox real coberto pelos tiles (alinhado ao grid de tiles, um pouco maior que o pedido)
+  const lonOeste = tile2lon(xMin, zoom), lonLeste = tile2lon(xMax + 1, zoom);
+  const latNorte = tile2lat(yMin, zoom), latSul = tile2lat(yMax + 1, zoom);
+  const larguraM = (lonLeste - lonOeste) * 111.32 * Math.cos(center.lat * DEG2RAD);
+  const alturaM = (latNorte - latSul) * 110.54;
+  const offsetXM = ((lonOeste + lonLeste) / 2 - center.lon) * 111.32 * Math.cos(center.lat * DEG2RAD);
+  const offsetZM = -((latNorte + latSul) / 2 - center.lat) * 110.54;
+
+  return {
+    zoom, xMin, xMax, yMin, yMax,
+    tilesX: xMax - xMin + 1, tilesY: yMax - yMin + 1,
+    larguraM, alturaM, offsetXM, offsetZM,
+  };
+}
+
+async function construirTerrenoSatelite(grade) {
+  const { zoom, xMin, xMax, yMin, yMax, tilesX, tilesY } = grade;
   const canvas = document.createElement('canvas');
   canvas.width = tilesX * TILE_SIZE;
   canvas.height = tilesY * TILE_SIZE;
@@ -1187,14 +1212,6 @@ async function construirTerrenoSatelite(center, raioKm) {
   }
   await Promise.all(cargas);
 
-  // bbox real coberto pelos tiles (alinhado ao grid de tiles, um pouco maior que o pedido)
-  const lonOeste = tile2lon(xMin, zoom), lonLeste = tile2lon(xMax + 1, zoom);
-  const latNorte = tile2lat(yMin, zoom), latSul = tile2lat(yMax + 1, zoom);
-  const larguraM = (lonLeste - lonOeste) * 111.32 * Math.cos(center.lat * DEG2RAD);
-  const alturaM = (latNorte - latSul) * 110.54;
-  const offsetXM = ((lonOeste + lonLeste) / 2 - center.lon) * 111.32 * Math.cos(center.lat * DEG2RAD);
-  const offsetZM = -((latNorte + latSul) / 2 - center.lat) * 110.54;
-
   const texture = new THREE.CanvasTexture(canvas);
   // canvas não é potência de 2 (depende da qtd. de tiles) — sem isso, o mapeamento a
   // distância (visão rasante) gera um aliasing forte em listras na textura do solo
@@ -1202,7 +1219,64 @@ async function construirTerrenoSatelite(center, raioKm) {
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
-  return { texture, larguraM, alturaM, offsetXM, offsetZM };
+  return texture;
+}
+
+// busca os tiles de elevação real (AWS Terrain Tiles, formato "Terrarium": elevação em
+// metros = R*256 + G + B/256 - 32768), cobrindo a MESMA grade de tiles da imagem de
+// satélite, pra poder amostrar o pixel certo por posição fracionária (u,v) do terreno.
+async function construirGradeElevacao(grade) {
+  const { zoom, xMin, xMax, yMin, yMax, tilesX, tilesY } = grade;
+  const largura = tilesX * TILE_SIZE, altura = tilesY * TILE_SIZE;
+  const canvas = document.createElement('canvas');
+  canvas.width = largura;
+  canvas.height = altura;
+  const ctx = canvas.getContext('2d');
+
+  const cargas = [];
+  for (let tx = xMin; tx <= xMax; tx++) {
+    for (let ty = yMin; ty <= yMax; ty++) {
+      const px = (tx - xMin) * TILE_SIZE, py = (ty - yMin) * TILE_SIZE;
+      cargas.push(new Promise(resolve => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => { ctx.drawImage(img, px, py, TILE_SIZE, TILE_SIZE); resolve(); };
+        img.onerror = () => resolve(); // sem cobertura nesse tile — fica 0 (ver filtro abaixo)
+        img.src = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${zoom}/${tx}/${ty}.png`;
+      }));
+    }
+  }
+  await Promise.all(cargas);
+
+  const pixels = ctx.getImageData(0, 0, largura, altura).data;
+  const elevacoes = new Float32Array(largura * altura);
+  for (let i = 0, p = 0; p < pixels.length; i++, p += 4) {
+    const m = (pixels[p] * 256 + pixels[p + 1] + pixels[p + 2] / 256) - 32768;
+    elevacoes[i] = m < -1000 ? 0 : m; // tile sem dado (preto) viraria -32768m — trata como 0
+  }
+  return { elevacoes, largura, altura };
+}
+
+function amostrarElevacao(gradeElevacao, u, v) {
+  const px = Math.min(Math.max(Math.round(u * (gradeElevacao.largura - 1)), 0), gradeElevacao.largura - 1);
+  const py = Math.min(Math.max(Math.round(v * (gradeElevacao.altura - 1)), 0), gradeElevacao.altura - 1);
+  return gradeElevacao.elevacoes[py * gradeElevacao.largura + px];
+}
+
+// desloca cada vértice do plano do terreno pela elevação real, relativa à elevação do
+// centro escolhido (mesmo referencial usado pelas aeronaves/pista em paraLocal — assim
+// tudo fica consistente: y=0 é sempre "altura do campo", não nível do mar).
+function aplicarRelevoNaGeometria(geo, gradeElevacao, center) {
+  const pos = geo.attributes.position;
+  const elevacaoCentroM = (center.elevacaoFt || 0) * 0.3048;
+  for (let i = 0; i < pos.count; i++) {
+    const u = pos.getX(i) / geo.parameters.width + 0.5;
+    const v = pos.getY(i) / geo.parameters.height + 0.5;
+    const elevM = amostrarElevacao(gradeElevacao, u, v);
+    pos.setZ(i, ((elevM - elevacaoCentroM) / 1000) * RELEVO_EXAGERO);
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
 }
 
 function adicionarPista(pista, center) {
@@ -1355,15 +1429,22 @@ function iniciarCena3D(centro, raioKm) {
   terreno.position.y = -0.001;
   scene.add(terreno);
 
-  construirTerrenoSatelite(centro, raioKm).then(({ texture, larguraM, alturaM, offsetXM, offsetZM }) => {
+  const gradeTiles = calcularGradeTiles(centro, raioKm);
+  Promise.all([
+    construirTerrenoSatelite(gradeTiles),
+    RELEVO_3D_REAL ? construirGradeElevacao(gradeTiles) : Promise.resolve(null),
+  ]).then(([texture, gradeElevacao]) => {
     if (centroAtivo !== centro) return; // usuário já saiu/trocou de cena antes de terminar de carregar
     // substitui a geometria/material do MESMO mesh (em vez de sobrepor um 2º plano),
     // senão os dois planos quase coplanares entram em z-fighting (listras) à distância
     terreno.geometry.dispose();
-    terreno.geometry = new THREE.PlaneGeometry(larguraM, alturaM);
+    terreno.geometry = gradeElevacao
+      ? new THREE.PlaneGeometry(gradeTiles.larguraM, gradeTiles.alturaM, RELEVO_SEGMENTOS, RELEVO_SEGMENTOS)
+      : new THREE.PlaneGeometry(gradeTiles.larguraM, gradeTiles.alturaM);
+    if (gradeElevacao) aplicarRelevoNaGeometria(terreno.geometry, gradeElevacao, centro);
     terreno.material.dispose();
     terreno.material = new THREE.MeshLambertMaterial({ map: texture });
-    terreno.position.set(offsetXM, -0.001, offsetZM);
+    terreno.position.set(gradeTiles.offsetXM, -0.001, gradeTiles.offsetZM);
   });
 
   // grade de referência no solo
