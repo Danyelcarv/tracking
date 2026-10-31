@@ -169,6 +169,26 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; overflow
   border: 1px solid #555; box-shadow: 0 2px 10px rgba(0,0,0,.6);
 }
 #mini-mapa-3d .leaflet-control-container { display: none; }
+#painel-lista-aeronaves {
+  position: absolute; top: 140px; left: 10px; bottom: 170px; width: 220px;
+  z-index: 999; background: rgba(0,0,0,.75); border-radius: 8px;
+  display: flex; flex-direction: column; overflow: hidden;
+  backdrop-filter: blur(4px); border: 1px solid #333;
+}
+#lista-aeronaves-titulo {
+  padding: 8px 12px; font-size: 12px; font-weight: 700; color: #fff;
+  border-bottom: 1px solid #333; flex-shrink: 0;
+}
+#lista-aeronaves-corpo { overflow-y: auto; flex: 1; }
+.item-lista-aeronave {
+  display: flex; align-items: center; gap: 6px; padding: 6px 12px;
+  cursor: pointer; border-bottom: 1px solid #222; color: #ddd; font-size: 12px;
+}
+.item-lista-aeronave:hover { background: rgba(255,255,255,.08); }
+.item-lista-aeronave.ativo { background: rgba(79,195,247,.25); color: #fff; }
+.item-lista-aeronave .voo { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item-lista-aeronave .alt { color: #aaa; font-size: 11px; white-space: nowrap; }
+#lista-aeronaves-vazia { padding: 12px; font-size: 12px; color: #888; text-align: center; }
 </style>
 </head>
 <body>
@@ -220,6 +240,10 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; overflow
   </div>
   <div id="r3d-seguir-bar">🛰 <span id="r3d-seguir-callsign"></span> <button id="r3d-seguir-cancelar" title="Parar de seguir">✕</button></div>
   <div id="bussola"><div id="bussola-fita"></div><div id="bussola-ponteiro"></div></div>
+  <div id="painel-lista-aeronaves">
+    <div id="lista-aeronaves-titulo">🛰️ Aeronaves na área (<span id="lista-aeronaves-total">0</span>)</div>
+    <div id="lista-aeronaves-corpo"></div>
+  </div>
   <div id="mini-mapa-3d"></div>
   <div id="painel-detalhe">
     <button id="painel-fechar" title="Fechar">✕</button>
@@ -1279,7 +1303,18 @@ function aplicarRelevoNaGeometria(geo, gradeElevacao, center) {
   geo.computeVertexNormals();
 }
 
-function adicionarPista(pista, center) {
+// altura real do terreno (relevo 3D) no ponto (x,z) do mundo, no mesmo referencial da
+// pista/aeronaves (relativo à elevação do centro escolhido) — usada pra "grudar" a pista
+// no relevo de verdade em vez de ficar numa altura fixa, que o relevo real podia cobrir.
+function alturaRelevoEm(x, z, gradeTiles, gradeElevacao, center) {
+  const u = (x - gradeTiles.offsetXM) / gradeTiles.larguraM + 0.5;
+  const v = (gradeTiles.offsetZM - z) / gradeTiles.alturaM + 0.5;
+  const elevM = amostrarElevacao(gradeElevacao, u, v);
+  const elevacaoCentroM = (center.elevacaoFt || 0) * 0.3048;
+  return ((elevM - elevacaoCentroM) / 1000) * RELEVO_EXAGERO;
+}
+
+function adicionarPista(pista, center, gradeTiles, gradeElevacao) {
   const p1 = paraLocal(pista.la, pista.lo, 0, center);
   const p2 = paraLocal(pista.ha, pista.ho, 0, center);
   const meio = p1.clone().add(p2).multiplyScalar(0.5);
@@ -1288,10 +1323,15 @@ function adicionarPista(pista, center) {
   // invisível; usamos um piso proporcional ao raio só para garantir visibilidade.
   const larguraReal = (pista.l || 30) * 0.0003048;
   const largura = Math.max(larguraReal, raioAtivoKm * 0.006);
+
+  const baseY = gradeElevacao
+    ? alturaRelevoEm(meio.x, meio.z, gradeTiles, gradeElevacao, center) + 0.004
+    : 0.002;
+
   const geo = new THREE.BoxGeometry(largura, 0.004, comprimento);
   const mat = new THREE.MeshBasicMaterial({ color: 0xf5f5f5, fog: false });
   const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.set(meio.x, 0.002, meio.z);
+  mesh.position.set(meio.x, baseY, meio.z);
   mesh.rotation.y = Math.atan2(p2.x - p1.x, p2.z - p1.z);
   scene.add(mesh);
 
@@ -1445,6 +1485,13 @@ function iniciarCena3D(centro, raioKm) {
     terreno.material.dispose();
     terreno.material = new THREE.MeshLambertMaterial({ map: texture });
     terreno.position.set(gradeTiles.offsetXM, -0.001, gradeTiles.offsetZM);
+
+    // pista(s) reais do aeroporto, se o centro escolhido tiver dados de runway — desenhada
+    // só agora (depois do relevo pronto) pra "grudar" na altura real do terreno ali; com
+    // altura fixa, o relevo real às vezes ficava mais alto que a pista e a cobria por cima.
+    if (centro.pistas && centro.pistas.length) {
+      centro.pistas.forEach(p => adicionarPista(p, centro, gradeTiles, gradeElevacao));
+    }
   });
 
   // grade de referência no solo
@@ -1463,11 +1510,6 @@ function iniciarCena3D(centro, raioKm) {
     const mat = new THREE.LineBasicMaterial({ color: 0x0b7a0b, transparent: true, opacity: 0.5 });
     scene.add(new THREE.LineLoop(geo, mat));
   });
-
-  // pista(s) reais do aeroporto, se o centro escolhido tiver dados de runway
-  if (centro.pistas && centro.pistas.length) {
-    centro.pistas.forEach(p => adicionarPista(p, centro));
-  }
 
   // marcador do centro escolhido: sem cone/pino — só a linha + rótulo "estilo carta",
   // com a sigla ICAO (se for aeroporto) ou a coordenada simplificada (se for um ponto
@@ -1585,6 +1627,7 @@ async function atualizarDados3D() {
 
     const naArea = aeronaves.filter(a => distKm(centroAtivo.lat, centroAtivo.lon, a.lat, a.lon) <= raioAtivoKm);
     document.getElementById('total3d').textContent = naArea.length;
+    atualizarListaAeronaves(naArea);
 
     Object.values(baldes).forEach(porCor => Object.values(porCor).forEach(b => { b.indiceParaHex = []; }));
     const contagem = {}; // categoria -> cor -> n
@@ -1728,6 +1771,37 @@ function selecionar(hex) {
   mostrarTrilha = true;
   desenharTrilha(hex);
   atualizarPainelConteudo();
+  marcarItemListaAtivo(hex);
+}
+
+// painel com a lista de aeronaves na área (callsign + altitude), à esquerda da tela —
+// clicar num item seleciona a aeronave do mesmo jeito que clicar nela na cena 3D (não é
+// um modo de seleção à parte). Reconstruída a cada poll, igual ao resto da UI do 3D.
+function atualizarListaAeronaves(naArea) {
+  document.getElementById('lista-aeronaves-total').textContent = naArea.length;
+  const corpo = document.getElementById('lista-aeronaves-corpo');
+  if (naArea.length === 0) {
+    corpo.innerHTML = '<div id="lista-aeronaves-vazia">Nenhuma aeronave na área</div>';
+    return;
+  }
+  const ordenado = [...naArea].sort((a, b) =>
+    (a.flight ? a.flight.trim() : a.hex).localeCompare(b.flight ? b.flight.trim() : b.hex)
+  );
+  corpo.innerHTML = ordenado.map(a => {
+    const callsign = a.flight ? a.flight.trim() : a.hex;
+    const alt = a.alt_baro === 'ground' ? 'Solo' : (a.alt_baro != null ? Math.round(Number(a.alt_baro)).toLocaleString() + ' ft' : '—');
+    const ativo = hexSelecionado === a.hex ? ' ativo' : '';
+    return `<div class="item-lista-aeronave${ativo}" data-hex="${a.hex}">✈ <span class="voo">${callsign}</span><span class="alt">${alt}</span></div>`;
+  }).join('');
+  corpo.querySelectorAll('.item-lista-aeronave').forEach(el => {
+    el.addEventListener('click', () => selecionar(el.dataset.hex));
+  });
+}
+
+function marcarItemListaAtivo(hex) {
+  document.querySelectorAll('#lista-aeronaves-corpo .item-lista-aeronave').forEach(el => {
+    el.classList.toggle('ativo', el.dataset.hex === hex);
+  });
 }
 
 function textoStatusHistorico() {
@@ -1898,6 +1972,7 @@ function fecharSelecao() {
   pararSeguir();
   // sem aeronave selecionada, o centro de rotação volta a ser o aeroporto/ponto escolhido
   controls.target.set(0, 0, 0);
+  marcarItemListaAtivo(null);
 }
 
 document.getElementById('r3d-seguir-cancelar').addEventListener('click', pararSeguir);
