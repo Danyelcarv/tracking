@@ -379,6 +379,21 @@ function iconeAeronave(alt, track, tipo, flight, stale, cat, modelo, gs) {
   });
 }
 
+// versão pequena do ícone de avião acima (reaproveita o mesmo SVG via svgPorTipo),
+// usada no mini-mapa de referência da cena 3D — sempre o formato genérico, sem
+// diferenciar jato/helicóptero/balão (não cabe nesse tamanho)
+function iconeAeronaveMini(track, corHex) {
+  const rot = track || 0;
+  return L.divIcon({
+    html: `<div style="transform:rotate(${rot}deg);">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14">
+        ${svgPorTipo('plane', corHex)}
+      </svg>
+    </div>`,
+    className: '', iconSize: [14, 14], iconAnchor: [7, 7],
+  });
+}
+
 function infoAeronave(a) {
   const alt = a.alt_baro === 'ground' ? 'Solo' : (a.alt_baro != null ? a.alt_baro.toLocaleString() + ' pés' : '—');
   const gs = a.gs != null ? a.gs.toFixed(1) + ' kn' : '—';
@@ -1484,16 +1499,17 @@ async function atualizarDados3D() {
       vistosAgora.add(a.hex);
 
       // mini-mapa 2D de referência também mostra o tracking ao vivo das aeronaves
-      // (não só o mapa-base), colorido igual à cena 3D
+      // (não só o mapa-base), com o mesmo ícone de avião (girado pelo rumo) do mapa
+      // 2D principal — pontos simples ficavam ilegíveis e sem indicar direção
       if (miniMapa3D) {
         const corHex = '#' + CORES[cor].toString(16).padStart(6, '0');
         let marcadorMini = miniMapaMarcadores.get(a.hex);
         if (!marcadorMini) {
-          marcadorMini = L.circleMarker([a.lat, a.lon], { radius: 3, weight: 0, color: corHex, fillColor: corHex, fillOpacity: 1, interactive: false }).addTo(miniMapa3D);
+          marcadorMini = L.marker([a.lat, a.lon], { icon: iconeAeronaveMini(a.track, corHex), interactive: false }).addTo(miniMapa3D);
           miniMapaMarcadores.set(a.hex, marcadorMini);
         } else {
           marcadorMini.setLatLng([a.lat, a.lon]);
-          marcadorMini.setStyle({ color: corHex, fillColor: corHex });
+          marcadorMini.setIcon(iconeAeronaveMini(a.track, corHex));
         }
       }
 
