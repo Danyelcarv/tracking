@@ -103,7 +103,14 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; overflow
   padding: 8px 20px; border-radius: 8px; font-size: 13px;
   display: flex; gap: 18px; align-items: center;
   backdrop-filter: blur(4px);
+  /* com left:50% o navegador só dá metade da tela pra barra e os textos quebravam linha;
+     max-content usa a largura que o conteúdo pede, limitada pra não encostar no botão
+     "Voltar" (esquerda) — se faltar espaço, só o nome do centro é abreviado com "…" */
+  width: max-content; max-width: max(320px, calc(100vw - 380px));
+  white-space: nowrap;
 }
+#r3d-info-bar > * { flex-shrink: 0; }
+#r3d-info-bar > .centro { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 #r3d-info-bar .badge { color: #f2c94c; font-weight: bold; }
 #r3d-info-bar button {
   background: #222; color: #fff; border: 1px solid #555; border-radius: 6px;
@@ -272,7 +279,7 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; overflow
   <button id="btn-voltar">◀ Voltar ao mapa 2D</button>
   <div id="r3d-info-bar">
     <span>🛰️ <span class="badge" id="total3d">0</span> aeronaves na área</span>
-    <span>📍 <b id="centro-ativo">—</b></span>
+    <span class="centro" id="centro-ativo-wrap">📍 <b id="centro-ativo">—</b></span>
     <span>📏 raio <b id="raio-ativo">—</b> km</span>
     <button id="btn-rotulos-aeronaves" title="Mostrar altitude, velocidade e rumo em cada aeronave">🏷️ Rótulos</button>
     <button id="btn-trilhas-todas" title="Mostrar a trilha de todas as aeronaves">〰 Trilhas</button>
@@ -916,6 +923,7 @@ document.getElementById('modo3d-entrar').addEventListener('click', () => {
   document.getElementById('footer-3d-credit').style.display = 'inline';
   document.getElementById('cena3d').style.display = 'block';
   document.getElementById('centro-ativo').textContent = centro.nome;
+  document.getElementById('centro-ativo-wrap').title = centro.nome; // nome completo, se abreviado
   document.getElementById('raio-ativo').textContent = raio;
   iniciarCena3D(centro, raio);
 });
