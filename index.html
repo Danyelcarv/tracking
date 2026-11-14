@@ -1679,9 +1679,35 @@ function aoRedimensionar() {
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
+// "voo" de câmera até a aeronave recém-selecionada: sem isso, só o alvo (target) pulava
+// pra aeronave nova e a câmera ficava onde estava — com o zoom longe, não dava pra saber
+// qual aeronave tinha sido selecionada. Mantém o ângulo de visão atual (só a elevação é
+// limitada) e para a uma distância fixa e próxima, proporcional ao tamanho das aeronaves.
+const TRANSICAO_CAMERA_MS = 800;
+const DIST_SELECAO_EM_TAMANHOS = 7; // distância final = 7x o tamanho visual da aeronave
+let transicaoCamera = null; // { t0, alvoDe, offsetDe, offsetPara }
+
+function aproximarCameraDe(hex) {
+  const a = aircraftData.get(hex);
+  if (!a || !camera) return;
+  const offsetDe = camera.position.clone().sub(controls.target);
+  const esfera = new THREE.Spherical().setFromVector3(offsetDe);
+  esfera.radius = Math.max(tamAeronaveAtual * DIST_SELECAO_EM_TAMANHOS, controls.minDistance * 1.2);
+  esfera.phi = Math.min(Math.max(esfera.phi, 0.5), 1.25); // nem de cima demais, nem rasante
+  const offsetPara = new THREE.Vector3().setFromSpherical(esfera);
+  transicaoCamera = { t0: performance.now(), alvoDe: controls.target.clone(), offsetDe, offsetPara };
+}
+
 function animar() {
   rafId = requestAnimationFrame(animar);
-  if (hexSelecionado && aircraftData.has(hexSelecionado)) {
+  if (transicaoCamera && hexSelecionado && aircraftData.has(hexSelecionado)) {
+    const k = Math.min((performance.now() - transicaoCamera.t0) / TRANSICAO_CAMERA_MS, 1);
+    const e = k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2; // easeInOutCubic
+    const alvoPara = aircraftData.get(hexSelecionado).pos;
+    controls.target.lerpVectors(transicaoCamera.alvoDe, alvoPara, e);
+    camera.position.copy(controls.target).add(transicaoCamera.offsetDe.clone().lerp(transicaoCamera.offsetPara, e));
+    if (k >= 1) transicaoCamera = null;
+  } else if (hexSelecionado && aircraftData.has(hexSelecionado)) {
     // centro de rotação acompanha a aeronave selecionada (não só em modo "Seguir");
     // só reposiciona o alvo (target), o OrbitControls mantém a distância/ângulo
     // que o usuário ajustou com zoom/rotação, então isso não cancela o "seguir"
@@ -1845,6 +1871,7 @@ function aoClicarDuplo(ev) {
 }
 
 function selecionar(hex) {
+  if (hex !== hexSelecionado) aproximarCameraDe(hex); // clicar de novo na mesma não mexe no zoom
   hexSelecionado = hex;
   document.getElementById('painel-detalhe').classList.add('aberto');
   // trilha abre automaticamente ao selecionar a aeronave
@@ -2318,6 +2345,7 @@ function atualizarPainelConteudo() {
 
 function comecarSeguir(hex) {
   seguindoHex3D = hex;
+  transicaoCamera = null; // o "seguir" posiciona a câmera por conta própria
   const a = aircraftData.get(hex);
   // posição inicial de câmera "chase" (atrás/acima); depois disso o usuário
   // pode dar zoom/orbitar livremente que o seguir continua (ver animar())
@@ -2434,6 +2462,7 @@ function alternarTodasTrilhas() {
 
 function fecharSelecao() {
   hexSelecionado = null;
+  transicaoCamera = null;
   painelHexMontado = null; // próxima seleção remonta o painel (e os gráficos) do zero
   hoverGraficoT = null;
   document.getElementById('painel-detalhe').classList.remove('aberto');
