@@ -2,6 +2,8 @@
 
 Rastreador de tráfego aéreo ADS-B em tempo real: mapa 2D ao vivo (Leaflet) com modo 3D (Three.js) acionável pelo botão "🌐 Modo 3D". Dados ao vivo do feed público `adsb.trafegoaereo.com/tar1090`.
 
+**Online:** https://trackingcarv.pages.dev/
+
 ## ⚠️ Requisito obrigatório: servidor PHP local
 
 **Este projeto NÃO funciona abrindo `index.html` direto no navegador (duplo-clique / `file:///...`).**
@@ -51,7 +53,7 @@ Configuração (uma vez só):
 1. Crie uma conta gratuita em [dash.cloudflare.com](https://dash.cloudflare.com/sign-up) (não pede cartão).
 2. **Workers & Pages → Create → Pages → Connect to Git**, autorize o GitHub e escolha o repositório `tracking`.
 3. Nas configurações de build: **Framework preset:** `None`, **Build command:** vazio, **Build output directory:** `/`.
-4. **Save and Deploy**. O site fica em `https://<nome-do-projeto>.pages.dev`.
+4. **Save and Deploy**. O site fica em `https://<nome-do-projeto>.pages.dev` — este projeto está em https://trackingcarv.pages.dev/.
 
 Depois disso, todo `git push` no `main` publica automaticamente.
 
