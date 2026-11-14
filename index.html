@@ -145,8 +145,8 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; overflow
   border-top: 7px solid #4fc3f7;
 }
 #painel-detalhe {
-  position: absolute; top: 0; right: 0; bottom: 0; width: 300px; max-width: 85vw;
-  z-index: 1001; background: rgba(14,16,20,.96); color: #eee;
+  position: absolute; top: 0; right: 0; bottom: 0; width: 360px; max-width: 85vw;
+  z-index: 1001; background: #0e1014; color: #eee; /* sólido: a legenda 3D não vaza por trás */
   border-left: 1px solid #333; padding: 54px 18px 18px; font-size: 13px;
   transform: translateX(100%); transition: transform .22s ease; overflow-y: auto;
 }
@@ -163,6 +163,45 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; overflow
   padding: 6px 10px; font-size: 12px; cursor: pointer;
 }
 #painel-conteudo .acoes button.ativo { background: #4fc3f7; color: #000; border-color: #4fc3f7; }
+#painel-conteudo .subtitulo { color: #aaa; font-size: 12px; margin-top: 2px; line-height: 1.4; }
+#painel-conteudo .alerta-emergencia {
+  margin-top: 10px; padding: 6px 10px; border-radius: 6px; font-weight: 700;
+  background: rgba(231,76,60,.18); border: 1px solid #e74c3c; color: #fff;
+}
+/* indicadores principais (altitude, velocidade, razão vertical, rumo) em grade 2x2 */
+#painel-conteudo .kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+#painel-conteudo .kpi { background: #1a1d23; border-radius: 6px; padding: 8px 10px; }
+#painel-conteudo .kpi .rotulo { color: #888; font-size: 11px; }
+#painel-conteudo .kpi .valor { color: #fff; font-size: 17px; font-weight: 700; margin-top: 2px; white-space: nowrap; }
+#painel-conteudo .kpi .valor small { color: #aaa; font-size: 11px; font-weight: 400; }
+/* gráficos de linha de altitude/velocidade (SVG desenhado à mão, sem biblioteca) */
+#painel-graficos { position: relative; margin-top: 16px; outline: none; }
+#painel-graficos:focus-visible { box-shadow: 0 0 0 2px #4fc3f7; border-radius: 4px; }
+#painel-graficos .titulo-grafico { color: #ddd; font-size: 12px; font-weight: 600; margin: 8px 0 2px; }
+#painel-graficos .titulo-grafico small { color: #888; font-weight: 400; }
+#painel-graficos svg { display: block; width: 100%; overflow: visible; }
+#painel-graficos .eixo-texto { fill: #888; font-size: 10px; font-family: 'Segoe UI', Tahoma, sans-serif; }
+#painel-graficos .sem-dados { color: #888; font-size: 11px; padding: 18px 0; text-align: center; }
+#grafico-tooltip {
+  position: absolute; pointer-events: none; display: none; z-index: 2;
+  background: #000; border: 1px solid #444; border-radius: 6px; padding: 6px 9px;
+  font-size: 11px; color: #aaa; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,.6);
+}
+#grafico-tooltip .linha-tt { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+#grafico-tooltip .chave-linha { width: 10px; height: 2px; background: #4fc3f7; border-radius: 1px; }
+#grafico-tooltip strong { color: #fff; font-size: 12px; }
+/* seções de informação recolhíveis */
+#painel-conteudo details { margin-top: 12px; border-top: 1px solid #2a2e35; padding-top: 8px; }
+#painel-conteudo summary { cursor: pointer; color: #ddd; font-weight: 600; font-size: 12px; user-select: none; }
+#painel-conteudo .grade-info { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin-top: 6px; font-size: 12px; }
+#painel-conteudo .grade-info .k { color: #888; }
+#painel-conteudo .grade-info .v { color: #eee; text-align: right; }
+#painel-conteudo .chips { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+#painel-conteudo .chip { background: #1f3a48; color: #cfefff; border-radius: 10px; padding: 1px 7px; font-size: 11px; }
+#painel-conteudo table.tabela-grafico { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 11px; }
+#painel-conteudo table.tabela-grafico th { color: #888; font-weight: 400; text-align: right; padding: 2px 4px; border-bottom: 1px solid #2a2e35; }
+#painel-conteudo table.tabela-grafico td { color: #ddd; text-align: right; padding: 2px 4px; }
+#painel-conteudo table.tabela-grafico th:first-child, #painel-conteudo table.tabela-grafico td:first-child { text-align: left; }
 #mini-mapa-3d {
   position: absolute; bottom: 10px; left: 10px; z-index: 1000;
   width: 190px; height: 150px; border-radius: 8px; overflow: hidden;
@@ -895,6 +934,9 @@ let aircraftData = new Map(); // hex -> dados + posição local
 let trilhas = new Map(); // hex -> [Vector3...] (acumulado ao vivo desde que a cena abriu)
 let historicoPorHex = new Map(); // hex -> [Vector3...] (reconstruído dos chunks de histórico do provedor)
 let historicoStatus = 'ocioso'; // 'ocioso' | 'carregando' | 'pronto' | 'indisponivel'
+// séries no tempo pros gráficos do painel: hex -> [{ t (ms), alt (pés), gs (kn) }]
+let seriePorHex = new Map(); // dos chunks de histórico (até ~1h antes de abrir a cena)
+let serieAoVivo = new Map(); // acumulada a cada poll desde que a cena abriu
 let hexSelecionado = null;
 let seguindoHex3D = null;
 let mostrarTrilha = false;
@@ -1601,11 +1643,17 @@ async function carregarHistorico(centro) {
     if (centroAtivo !== centro) return; // saiu da cena enquanto baixava
 
     const novoHistorico = new Map();
+    const novaSerie = new Map();
     resultados.forEach(dados => {
       if (!dados || !dados.files) return;
       dados.files.forEach(snapshot => {
+        // cada registro: [hex, alt_baro, gs, track, lat, lon, seen_pos, type, flight, messages]
         (snapshot.aircraft || []).forEach(ac => {
-          const [hex, alt_baro, , , lat, lon] = ac;
+          const [hex, alt_baro, gs, , lat, lon] = ac;
+          if (snapshot.now) {
+            if (!novaSerie.has(hex)) novaSerie.set(hex, []);
+            novaSerie.get(hex).push(pontoSerie(snapshot.now * 1000, alt_baro, gs));
+          }
           if (lat == null || lon == null) return;
           if (!novoHistorico.has(hex)) novoHistorico.set(hex, []);
           novoHistorico.get(hex).push(paraLocal(lat, lon, alt_baro, centro));
@@ -1613,6 +1661,7 @@ async function carregarHistorico(centro) {
       });
     });
     historicoPorHex = novoHistorico;
+    seriePorHex = novaSerie;
     historicoStatus = 'pronto';
 
     if (hexSelecionado && mostrarTrilha) desenharTrilha(hexSelecionado);
@@ -1650,6 +1699,7 @@ async function atualizarDados3D() {
     if (!resp.ok || !centroAtivo) return; // pode ter voltado para a seleção enquanto buscava
     const data = await resp.json();
     const aeronaves = (data.aircraft || []).filter(a => a.lat != null && a.lon != null);
+    const instanteMs = data.now ? data.now * 1000 : Date.now();
 
     const naArea = aeronaves.filter(a => distKm(centroAtivo.lat, centroAtivo.lon, a.lat, a.lon) <= raioAtivoKm);
     document.getElementById('total3d').textContent = naArea.length;
@@ -1699,7 +1749,11 @@ async function atualizarDados3D() {
       aircraftData.set(a.hex, {
         hex: a.hex, flight: a.flight, alt_baro: a.alt_baro, gs: a.gs, track: a.track,
         type: a.type, category: a.category, lat: a.lat, lon: a.lon, pos, modelo,
+        bruto: a, // registro completo do feed (todos os campos), mostrado no painel lateral
       });
+
+      if (!serieAoVivo.has(a.hex)) serieAoVivo.set(a.hex, []);
+      serieAoVivo.get(a.hex).push(pontoSerie(instanteMs, a.alt_baro, a.gs));
 
       if (!trilhas.has(a.hex)) trilhas.set(a.hex, []);
       const trilha = trilhas.get(a.hex);
@@ -1840,29 +1894,417 @@ function textoStatusHistorico() {
   return '';
 }
 
-function atualizarPainelConteudo() {
-  const a = aircraftData.get(hexSelecionado);
-  if (!a) return;
-  const alt = a.alt_baro === 'ground' ? 'Solo' : (a.alt_baro != null ? a.alt_baro.toLocaleString() + ' pés' : '—');
-  const gs = a.gs != null ? a.gs.toFixed(1) + ' kn' : '—';
-  const track = a.track != null ? a.track.toFixed(1) + '°' : '—';
-  const voo = a.flight ? a.flight.trim() : '—';
-  const modeloStr = a.modelo ? `${a.modelo.m} (${a.modelo.f})` : '—';
+// ---------- Painel lateral da aeronave selecionada ----------
+// Montado em 3 partes: cabeçalho + seções (refeitos a cada poll) e os gráficos (montados
+// uma vez por aeronave e só redesenhados) — assim o cursor do gráfico e as seções
+// abertas/fechadas sobrevivem à atualização a cada ~3.5s.
 
-  document.getElementById('painel-conteudo').innerHTML = `
-    <div style="font-size:16px;"><b>✈ ${voo}</b></div>
-    <hr style="margin:10px 0;border-color:#333;">
-    <div class="linha-info">ICAO: <b>${a.hex}</b></div>
-    <div class="linha-info">Tipo: ${a.type || '—'}</div>
-    <div class="linha-info">Modelo: ${modeloStr}</div>
-    <div class="linha-info">Altitude: ${alt}</div>
-    <div class="linha-info">Velocidade: ${gs}</div>
-    <div class="linha-info">Rumo: ${track}</div>
-    <div class="linha-info" style="color:#888;font-size:11px;">${textoStatusHistorico()}</div>
+// textos vindos do feed/CSV (callsign, squawk, modelo...) passam por aqui antes do innerHTML
+function escaparHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function fmtNum(v, casas = 0) {
+  return Number(v).toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas });
+}
+
+function fmtHora(t, comSegundos) {
+  return new Date(t).toLocaleTimeString('pt-BR', comSegundos ? {} : { hour: '2-digit', minute: '2-digit' });
+}
+
+function rumoCardinal(graus) {
+  return ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(((graus % 360) + 360) % 360 / 45) % 8];
+}
+
+// ponto da série dos gráficos; 'ground' vira altitude 0 (solo)
+function pontoSerie(t, altBaro, gs) {
+  return {
+    t,
+    alt: altBaro === 'ground' ? 0 : (typeof altBaro === 'number' ? altBaro : null),
+    gs: typeof gs === 'number' ? gs : null,
+  };
+}
+
+// histórico (chunks, até ~1h) + ao vivo, em ordem de tempo e sem pontos repetidos
+function serieVoo(hex) {
+  const pontos = [...(seriePorHex.get(hex) || []), ...(serieAoVivo.get(hex) || [])].sort((p, q) => p.t - q.t);
+  const unicos = [];
+  pontos.forEach(p => { if (!unicos.length || p.t - unicos[unicos.length - 1].t >= 1000) unicos.push(p); });
+  return unicos;
+}
+
+const CATEGORIAS_ADSB = {
+  A1: 'Leve (< 7 t)', A2: 'Pequena (7–34 t)', A3: 'Grande (34–136 t)', A4: 'Alto vórtice (B757)',
+  A5: 'Pesada (> 136 t)', A6: 'Alta performance', A7: 'Helicóptero',
+  B1: 'Planador', B2: 'Balão / dirigível', B3: 'Paraquedista', B4: 'Ultraleve', B6: 'Drone', B7: 'Veículo espacial',
+  C1: 'Veículo de emergência (solo)', C2: 'Veículo de serviço (solo)', C3: 'Obstáculo fixo',
+};
+const FONTES_POSICAO = {
+  adsb_icao: 'ADS-B', adsb_icao_nt: 'ADS-B (sem transponder)', adsr_icao: 'ADS-R (retransmitido)',
+  tisb_icao: 'TIS-B', mlat: 'MLAT (multilateração)', mode_s: 'Modo S (sem posição própria)',
+  adsb_other: 'ADS-B (endereço não-ICAO)', adsr_other: 'ADS-R (endereço não-ICAO)',
+  tisb_other: 'TIS-B (endereço não-ICAO)', tisb_trackfile: 'TIS-B (radar)', other: 'Outra', unknown: 'Desconhecida',
+};
+const MODOS_NAV = { autopilot: 'Piloto automático', vnav: 'VNAV', lnav: 'LNAV', althold: 'Mantém altitude', approach: 'Aproximação', tcas: 'TCAS' };
+const SQUAWKS_ESPECIAIS = { '7500': 'interferência ilícita', '7600': 'falha de rádio', '7700': 'emergência' };
+const EMERGENCIAS = {
+  general: 'Emergência geral', lifeguard: 'Emergência médica', minfuel: 'Combustível mínimo',
+  nordo: 'Sem comunicação por rádio', unlawful: 'Interferência ilícita', downed: 'Aeronave em perigo', reserved: 'Reservado',
+};
+
+let painelHexMontado = null; // hex cujo esqueleto (com os gráficos) está montado no painel
+const secoesAbertas = new Set(['voo', 'autopiloto', 'transponder']);
+let hoverGraficoT = null; // instante (ms) sob o cursor dos gráficos; mantido entre os polls
+let geometriaGraficos = null; // escalas do último desenho, usadas pelo cursor
+
+function linhaInfo(rotulo, valorHtml, dica) {
+  if (valorHtml == null || valorHtml === '') return '';
+  return `<span class="k"${dica ? ` title="${escaparHtml(dica)}"` : ''}>${rotulo}</span><span class="v">${valorHtml}</span>`;
+}
+
+function secao(id, titulo, linhasHtml, vazioTxt) {
+  const corpo = linhasHtml.join('');
+  if (!corpo && !vazioTxt) return '';
+  return `<details data-secao="${id}"${secoesAbertas.has(id) ? ' open' : ''}>
+    <summary>${titulo}</summary>
+    ${corpo ? `<div class="grade-info">${corpo}</div>` : `<div class="subtitulo" style="margin-top:6px;">${vazioTxt}</div>`}
+  </details>`;
+}
+
+function htmlCabecalho(a, b) {
+  const voo = b.flight ? b.flight.trim() : '';
+  const m = a.modelo;
+  const modeloTxt = m && (m.m || m.t) ? [m.f, m.m || m.t].filter(Boolean).join(' ') : 'Modelo não identificado';
+  const detalhes = [`ICAO ${b.hex.toUpperCase()}`, m && m.t ? `tipo ${m.t}` : null, CATEGORIAS_ADSB[b.category] || null].filter(Boolean);
+
+  const squawkEspecial = SQUAWKS_ESPECIAIS[b.squawk];
+  const emergencia = b.emergency && b.emergency !== 'none' ? (EMERGENCIAS[b.emergency] || b.emergency) : null;
+  const alerta = squawkEspecial || emergencia
+    ? `<div class="alerta-emergencia">🚨 ${escaparHtml(emergencia || 'Squawk ' + b.squawk + ' — ' + squawkEspecial)}</div>` : '';
+
+  const alt = b.alt_baro === 'ground' ? 'Solo' : (b.alt_baro != null ? `${fmtNum(b.alt_baro)} <small>pés</small>` : '—');
+  const gs = b.gs != null ? `${fmtNum(b.gs)} <small>kn · ${fmtNum(b.gs * 1.852)} km/h</small>` : '—';
+  const razao = b.baro_rate != null ? b.baro_rate : b.geom_rate;
+  const razaoTxt = razao == null ? '—'
+    : Math.abs(razao) < 100 ? '→ nivelado'
+    : `${razao > 0 ? '↑' : '↓'} ${fmtNum(Math.abs(razao))} <small>pés/min</small>`;
+  const rumo = b.track != null ? b.track : b.true_heading;
+  const rumoTxt = rumo != null ? `${fmtNum(rumo)}° <small>${rumoCardinal(rumo)}</small>` : '—';
+
+  return `
+    <div style="font-size:18px;"><b>✈ ${escaparHtml(voo || b.hex.toUpperCase())}</b></div>
+    <div class="subtitulo">${escaparHtml(modeloTxt)}${m && m.o ? ' · ' + escaparHtml(m.o) : ''}</div>
+    <div class="subtitulo">${escaparHtml(detalhes.join(' · '))}</div>
+    ${alerta}
     <div class="acoes">
       <button id="acao-seguir" class="${seguindoHex3D === hexSelecionado ? 'ativo' : ''}">🎥 Seguir</button>
       <button id="acao-trilha" class="${mostrarTrilha ? 'ativo' : ''}">〰 Trilha</button>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="rotulo">Altitude</div><div class="valor">${alt}</div></div>
+      <div class="kpi"><div class="rotulo">Velocidade (solo)</div><div class="valor">${gs}</div></div>
+      <div class="kpi"><div class="rotulo">Razão vertical</div><div class="valor">${razaoTxt}</div></div>
+      <div class="kpi"><div class="rotulo">Rumo</div><div class="valor">${rumoTxt}</div></div>
     </div>`;
+}
+
+function htmlSecoes(a, b) {
+  const graus = v => v != null ? `${fmtNum(v, 1)}°` : null;
+  const pes = v => v != null ? `${fmtNum(v)} pés` : null;
+  const kn = v => v != null ? `${fmtNum(v)} kn` : null;
+  const segAtras = v => v != null ? `há ${fmtNum(v, 1)} s` : null;
+
+  const voo = secao('voo', '✈️ Voo', [
+    linhaInfo('Altitude geométrica', pes(b.alt_geom), 'Altitude pelo GPS (GNSS), acima do elipsoide — difere da barométrica conforme a pressão do dia'),
+    linhaInfo('Velocidade verdadeira (TAS)', kn(b.tas)),
+    linhaInfo('Velocidade indicada (IAS)', kn(b.ias)),
+    linhaInfo('Mach', b.mach != null ? fmtNum(b.mach, 3) : null),
+    linhaInfo('Proa verdadeira', graus(b.true_heading), 'Para onde o nariz aponta — difere do rumo (trajetória) com vento lateral'),
+    linhaInfo('Proa magnética', graus(b.mag_heading)),
+    linhaInfo('Inclinação lateral', b.roll != null ? `${fmtNum(b.roll, 1)}°` : null),
+    linhaInfo('Distância do centro', centroAtivo ? `${fmtNum(distKm(centroAtivo.lat, centroAtivo.lon, b.lat, b.lon), 1)} km` : null),
+    linhaInfo('Posição', `${fmtNum(b.lat, 5)}, ${fmtNum(b.lon, 5)}`),
+  ]);
+
+  const modos = (b.nav_modes || []).map(md => `<span class="chip">${escaparHtml(MODOS_NAV[md] || md)}</span>`).join('');
+  const autopiloto = secao('autopiloto', '🧭 Piloto automático e navegação', [
+    linhaInfo('Altitude selecionada', pes(b.nav_altitude_mcp), 'Altitude ajustada pelo piloto no painel do piloto automático (MCP/FCU)'),
+    linhaInfo('Altitude do FMS', pes(b.nav_altitude_fms), 'Altitude programada no computador de gerenciamento de voo'),
+    linhaInfo('Proa selecionada', graus(b.nav_heading)),
+    linhaInfo('QNH ajustado', b.nav_qnh != null ? `${fmtNum(b.nav_qnh, 1)} hPa` : null, 'Pressão de referência ajustada no altímetro'),
+    linhaInfo('Modos ativos', modos ? `<div class="chips">${modos}</div>` : null),
+  ], 'Esta aeronave não transmite dados de navegação.');
+
+  const squawkTxt = b.squawk ? escaparHtml(b.squawk) + (SQUAWKS_ESPECIAIS[b.squawk] ? ` (${SQUAWKS_ESPECIAIS[b.squawk]})` : '') : null;
+  const sinalizadores = [b.alert ? 'Alerta' : null, b.spi ? 'Ident (SPI)' : null].filter(Boolean).join(', ');
+  const transponder = secao('transponder', '📡 Transponder e sinal', [
+    linhaInfo('Squawk', squawkTxt, 'Código de 4 dígitos atribuído pelo controle de tráfego aéreo'),
+    linhaInfo('Emergência', b.emergency && b.emergency !== 'none' ? escaparHtml(EMERGENCIAS[b.emergency] || b.emergency) : null),
+    linhaInfo('Fonte da posição', b.type ? escaparHtml(FONTES_POSICAO[b.type] || b.type) : null),
+    linhaInfo('Versão ADS-B', b.version != null ? `v${b.version}` : null),
+    linhaInfo('Sinal (RSSI)', b.rssi != null ? `${fmtNum(b.rssi, 1)} dBFS` : null, 'Intensidade do sinal no receptor — mais perto de 0 é mais forte'),
+    linhaInfo('Mensagens recebidas', b.messages != null ? fmtNum(b.messages) : null),
+    linhaInfo('Última mensagem', segAtras(b.seen)),
+    linhaInfo('Última posição', segAtras(b.seen_pos)),
+    linhaInfo('Sinalizadores', sinalizadores || null),
+  ]);
+
+  const qualidade = secao('qualidade', '🎯 Qualidade dos dados', [
+    linhaInfo('NIC', b.nic, 'Integridade da navegação (0–11, maior é melhor)'),
+    linhaInfo('Raio de contenção', b.rc != null ? `${fmtNum(b.rc)} m` : null, 'Raio dentro do qual a posição real está garantida'),
+    linhaInfo('NACp', b.nac_p, 'Precisão da posição (0–11, maior é melhor)'),
+    linhaInfo('NACv', b.nac_v, 'Precisão da velocidade (0–4, maior é melhor)'),
+    linhaInfo('SIL', b.sil != null ? `${b.sil}${b.sil_type ? ' (' + escaparHtml(b.sil_type) + ')' : ''}` : null, 'Nível de integridade da fonte (0–3, maior é melhor)'),
+    linhaInfo('GVA', b.gva, 'Precisão vertical geométrica (0–2)'),
+    linhaInfo('SDA', b.sda, 'Nível de garantia do projeto do sistema (0–3)'),
+    linhaInfo('NIC baro', b.nic_baro, '1 = altitude barométrica verificada por uma segunda fonte'),
+  ]);
+
+  return voo + autopiloto + transponder + qualidade + htmlTabelaGraficos(a.hex) +
+    `<div class="subtitulo" style="margin-top:12px;font-size:11px;color:#888;">${textoStatusHistorico()}</div>`;
+}
+
+// versão em tabela dos gráficos (1 linha por minuto, mais recente primeiro) — o mesmo
+// conteúdo acessível sem depender de passar o mouse sobre o gráfico
+function htmlTabelaGraficos(hex) {
+  const pontos = serieVoo(hex);
+  if (pontos.length < 2) return '';
+  const porMinuto = new Map();
+  pontos.forEach(p => porMinuto.set(Math.floor(p.t / 60000), p)); // fica o último ponto de cada minuto
+  const linhas = [...porMinuto.values()].reverse().slice(0, 90).map(p =>
+    `<tr><td>${fmtHora(p.t)}</td><td>${p.alt == null ? '—' : p.alt === 0 ? 'Solo' : fmtNum(p.alt)}</td><td>${p.gs == null ? '—' : fmtNum(p.gs)}</td></tr>`
+  ).join('');
+  return `<details data-secao="tabela"${secoesAbertas.has('tabela') ? ' open' : ''}>
+    <summary>📋 Tabela dos gráficos</summary>
+    <table class="tabela-grafico"><thead><tr><th>Hora</th><th>Altitude (pés)</th><th>Velocidade (kn)</th></tr></thead><tbody>${linhas}</tbody></table>
+  </details>`;
+}
+
+// ---- Gráficos de linha (altitude e velocidade x tempo), SVG desenhado à mão ----
+const GRAF_ALTURA = 96;
+const GRAF_M = { esq: 34, dir: 8, topo: 6, base: 18 };
+const GRAF_COR = '#4fc3f7'; // mesma cor da trilha da aeronave selecionada na cena 3D
+const GRAF_GRADE = '#2a2e35';
+const GRAF_SUPERFICIE = '#0e1014';
+const GRAF_QUEBRA_MS = 120000; // mais de 2 min sem dados quebra a linha (não inventa trecho)
+
+function ticksRedondos(maximo, quantidade) {
+  const passoBruto = Math.max(maximo, 1) / quantidade;
+  const mag = 10 ** Math.floor(Math.log10(passoBruto));
+  const passo = [1, 2, 2.5, 5, 10].map(f => f * mag).find(p => p >= passoBruto);
+  const ticks = [];
+  for (let v = 0; v < maximo + passo; v += passo) ticks.push(v);
+  return ticks;
+}
+
+function ticksTempo(g) {
+  const spanMin = (g.tMax - g.tMin) / 60000;
+  const passoMin = [1, 2, 5, 10, 15, 20, 30, 60].find(p => spanMin / p <= 4) || 60;
+  const passo = passoMin * 60000;
+  const ticks = [];
+  for (let t = Math.ceil(g.tMin / passo) * passo; t <= g.tMax; t += passo) ticks.push(t);
+  return ticks;
+}
+
+function xDoTempo(t, g) {
+  const w = g.largura - GRAF_M.esq - GRAF_M.dir;
+  return GRAF_M.esq + (g.tMax === g.tMin ? w : (t - g.tMin) / (g.tMax - g.tMin) * w);
+}
+
+function svgGraficoLinha(chave, g, nome) {
+  const validos = g.pontos.filter(p => p[chave] != null);
+  if (validos.length < 2) return '<div class="sem-dados">Sem dados suficientes</div>';
+  const yBase = GRAF_ALTURA - GRAF_M.base;
+  const ticks = ticksRedondos(Math.max(...validos.map(p => p[chave])), 3);
+  const yMax = ticks[ticks.length - 1];
+  const y = v => yBase - (v / yMax) * (yBase - GRAF_M.topo);
+  g.escalas[chave] = y;
+  // eixo com 10.000 ou mais usa formato compacto (10K, 20K...) em todos os ticks
+  const fmtTick = v => yMax >= 10000 ? (v === 0 ? '0' : fmtNum(v / 1000) + 'K') : fmtNum(v);
+
+  let svg = `<svg viewBox="0 0 ${g.largura} ${GRAF_ALTURA}" height="${GRAF_ALTURA}" role="img" aria-label="${nome} ao longo do tempo">`;
+  ticks.forEach(v => {
+    svg += `<line x1="${GRAF_M.esq}" x2="${g.largura - GRAF_M.dir}" y1="${y(v)}" y2="${y(v)}" stroke="${GRAF_GRADE}" stroke-width="1"/>`;
+    svg += `<text class="eixo-texto" x="${GRAF_M.esq - 4}" y="${y(v) + 3}" text-anchor="end">${fmtTick(v)}</text>`;
+  });
+  ticksTempo(g).forEach(t => {
+    const x = xDoTempo(t, g);
+    if (x < GRAF_M.esq + 12 || x > g.largura - GRAF_M.dir - 12) return;
+    svg += `<text class="eixo-texto" x="${x}" y="${GRAF_ALTURA - 4}" text-anchor="middle">${fmtHora(t)}</text>`;
+  });
+
+  // trechos contínuos (buracos longos sem dado viram quebra na linha)
+  const trechos = [];
+  validos.forEach(p => {
+    const ultimo = trechos.length ? trechos[trechos.length - 1] : null;
+    if (!ultimo || p.t - ultimo[ultimo.length - 1].t > GRAF_QUEBRA_MS) trechos.push([p]); else ultimo.push(p);
+  });
+  trechos.forEach(trecho => {
+    const pts = trecho.map(p => [xDoTempo(p.t, g).toFixed(1), y(p[chave]).toFixed(1)]);
+    if (pts.length === 1) {
+      svg += `<circle cx="${pts[0][0]}" cy="${pts[0][1]}" r="1.5" fill="${GRAF_COR}"/>`;
+      return;
+    }
+    const linha = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0]},${p[1]}`).join('');
+    svg += `<path d="${linha}L${pts[pts.length - 1][0]},${yBase}L${pts[0][0]},${yBase}Z" fill="${GRAF_COR}" fill-opacity="0.1"/>`;
+    svg += `<path d="${linha}" fill="none" stroke="${GRAF_COR}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  });
+  // ponto final = posição atual
+  const ult = validos[validos.length - 1];
+  svg += `<circle cx="${xDoTempo(ult.t, g)}" cy="${y(ult[chave])}" r="4" fill="${GRAF_COR}" stroke="${GRAF_SUPERFICIE}" stroke-width="2"/>`;
+  // cursor (linha vertical + ponto), posicionado por desenharCursorGraficos()
+  svg += `<g class="cursor" display="none">
+    <line y1="${GRAF_M.topo}" y2="${yBase}" stroke="#888" stroke-width="1"/>
+    <circle r="4" fill="${GRAF_COR}" stroke="${GRAF_SUPERFICIE}" stroke-width="2"/>
+  </g></svg>`;
+  return svg;
+}
+
+function desenharGraficos(hex) {
+  const pontos = serieVoo(hex);
+  const elAlt = document.getElementById('grafico-alt'), elGs = document.getElementById('grafico-gs');
+  if (pontos.length < 2) {
+    geometriaGraficos = null;
+    const msg = historicoStatus === 'carregando' ? 'Carregando histórico de voo…' : 'Coletando dados… o gráfico aparece em alguns segundos';
+    elAlt.innerHTML = elGs.innerHTML = `<div class="sem-dados">${msg}</div>`;
+    desenharCursorGraficos();
+    return;
+  }
+  const g = {
+    pontos, largura: elAlt.clientWidth || 324,
+    tMin: pontos[0].t, tMax: pontos[pontos.length - 1].t, escalas: {},
+  };
+  elAlt.innerHTML = svgGraficoLinha('alt', g, 'Altitude');
+  elGs.innerHTML = svgGraficoLinha('gs', g, 'Velocidade');
+  geometriaGraficos = g;
+  desenharCursorGraficos();
+}
+
+function indiceMaisProximo(pontos, t) {
+  let melhor = 0;
+  pontos.forEach((p, i) => { if (Math.abs(p.t - t) < Math.abs(pontos[melhor].t - t)) melhor = i; });
+  return melhor;
+}
+
+// cursor sincronizado nos dois gráficos (mesmo eixo de tempo) + um tooltip com os dois valores
+function desenharCursorGraficos() {
+  const tooltip = document.getElementById('grafico-tooltip');
+  if (!tooltip) return;
+  const area = document.getElementById('painel-graficos');
+  const g = geometriaGraficos;
+  if (!g || hoverGraficoT == null) {
+    tooltip.style.display = 'none';
+    area.querySelectorAll('.cursor').forEach(c => c.setAttribute('display', 'none'));
+    return;
+  }
+  const p = g.pontos[indiceMaisProximo(g.pontos, hoverGraficoT)];
+  const x = xDoTempo(p.t, g);
+  ['alt', 'gs'].forEach(chave => {
+    const cursor = document.querySelector(`#grafico-${chave} .cursor`);
+    if (!cursor) return;
+    cursor.setAttribute('display', '');
+    const linha = cursor.querySelector('line');
+    linha.setAttribute('x1', x); linha.setAttribute('x2', x);
+    const ponto = cursor.querySelector('circle');
+    if (p[chave] != null && g.escalas[chave]) {
+      ponto.setAttribute('display', '');
+      ponto.setAttribute('cx', x); ponto.setAttribute('cy', g.escalas[chave](p[chave]));
+    } else {
+      ponto.setAttribute('display', 'none');
+    }
+  });
+
+  // conteúdo via textContent (valores vêm do feed): hora + altitude + velocidade
+  tooltip.textContent = '';
+  const hora = document.createElement('div');
+  hora.textContent = fmtHora(p.t, true);
+  tooltip.appendChild(hora);
+  [[p.alt == null ? '—' : p.alt === 0 ? 'Solo' : fmtNum(p.alt), 'pés'],
+   [p.gs == null ? '—' : fmtNum(p.gs), 'kn']].forEach(([valor, unidade]) => {
+    const linha = document.createElement('div');
+    linha.className = 'linha-tt';
+    const chaveLinha = document.createElement('span');
+    chaveLinha.className = 'chave-linha';
+    const forte = document.createElement('strong');
+    forte.textContent = valor;
+    linha.append(chaveLinha, forte, document.createTextNode(' ' + unidade));
+    tooltip.appendChild(linha);
+  });
+  tooltip.style.display = 'block';
+  // escala do SVG (viewBox) -> pixels da tela, e o tooltip troca de lado perto da borda direita
+  const escala = area.clientWidth / g.largura;
+  const xPx = x * escala;
+  const esquerda = xPx + 12 + tooltip.offsetWidth > area.clientWidth ? xPx - 12 - tooltip.offsetWidth : xPx + 12;
+  tooltip.style.left = Math.max(0, esquerda) + 'px';
+  tooltip.style.top = '24px';
+}
+
+function montarEsqueletoPainel(hex) {
+  document.getElementById('painel-conteudo').innerHTML = `
+    <div id="painel-cabecalho"></div>
+    <div id="painel-graficos" tabindex="0" aria-label="Gráficos de altitude e velocidade. Use as setas para percorrer os pontos.">
+      <div class="titulo-grafico">Altitude <small>(pés)</small></div>
+      <div id="grafico-alt"></div>
+      <div class="titulo-grafico">Velocidade em relação ao solo <small>(nós)</small></div>
+      <div id="grafico-gs"></div>
+      <div id="grafico-tooltip"></div>
+    </div>
+    <div id="painel-secoes"></div>`;
+  painelHexMontado = hex;
+  hoverGraficoT = null;
+
+  const area = document.getElementById('painel-graficos');
+  area.addEventListener('pointermove', ev => {
+    const g = geometriaGraficos;
+    const svg = area.querySelector('svg');
+    if (!g || !svg) return;
+    const r = svg.getBoundingClientRect();
+    const xSvg = (ev.clientX - r.left) * (g.largura / r.width);
+    const frac = (xSvg - GRAF_M.esq) / (g.largura - GRAF_M.esq - GRAF_M.dir);
+    hoverGraficoT = g.tMin + Math.min(Math.max(frac, 0), 1) * (g.tMax - g.tMin);
+    desenharCursorGraficos();
+  });
+  area.addEventListener('pointerleave', () => {
+    if (document.activeElement === area) return; // com foco do teclado, o cursor fica
+    hoverGraficoT = null;
+    desenharCursorGraficos();
+  });
+  // teclado: setas percorrem os pontos, Home/End vão pro início/fim
+  area.addEventListener('focus', () => {
+    if (geometriaGraficos && hoverGraficoT == null) { hoverGraficoT = geometriaGraficos.tMax; desenharCursorGraficos(); }
+  });
+  area.addEventListener('blur', () => { hoverGraficoT = null; desenharCursorGraficos(); });
+  area.addEventListener('keydown', ev => {
+    const g = geometriaGraficos;
+    if (!g) return;
+    let i = indiceMaisProximo(g.pontos, hoverGraficoT != null ? hoverGraficoT : g.tMax);
+    if (ev.key === 'ArrowLeft') i--;
+    else if (ev.key === 'ArrowRight') i++;
+    else if (ev.key === 'Home') i = 0;
+    else if (ev.key === 'End') i = g.pontos.length - 1;
+    else return;
+    ev.preventDefault();
+    hoverGraficoT = g.pontos[Math.min(Math.max(i, 0), g.pontos.length - 1)].t;
+    desenharCursorGraficos();
+  });
+}
+
+// lembra quais seções o usuário abriu/fechou (o painel é refeito a cada poll);
+// 'toggle' não borbulha, por isso a captura
+document.getElementById('painel-conteudo').addEventListener('toggle', ev => {
+  const id = ev.target.dataset && ev.target.dataset.secao;
+  if (!id) return;
+  if (ev.target.open) secoesAbertas.add(id); else secoesAbertas.delete(id);
+}, true);
+
+function atualizarPainelConteudo() {
+  const a = aircraftData.get(hexSelecionado);
+  if (!a) return;
+  if (painelHexMontado !== hexSelecionado) montarEsqueletoPainel(hexSelecionado);
+  const b = a.bruto || a;
+  document.getElementById('painel-cabecalho').innerHTML = htmlCabecalho(a, b);
+  document.getElementById('painel-secoes').innerHTML = htmlSecoes(a, b);
+  desenharGraficos(hexSelecionado);
 
   document.getElementById('acao-seguir').onclick = () => {
     if (seguindoHex3D === hexSelecionado) pararSeguir(); else comecarSeguir(hexSelecionado);
@@ -1992,6 +2434,8 @@ function alternarTodasTrilhas() {
 
 function fecharSelecao() {
   hexSelecionado = null;
+  painelHexMontado = null; // próxima seleção remonta o painel (e os gráficos) do zero
+  hoverGraficoT = null;
   document.getElementById('painel-detalhe').classList.remove('aberto');
   mostrarTrilha = false;
   removerTrilha();
@@ -2027,6 +2471,8 @@ document.getElementById('btn-voltar').addEventListener('click', () => {
   aircraftData.clear();
   trilhas.clear();
   historicoPorHex.clear();
+  seriePorHex.clear();
+  serieAoVivo.clear();
   historicoStatus = 'ocioso';
 
   document.getElementById('cena3d').style.display = 'none';

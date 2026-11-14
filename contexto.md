@@ -64,6 +64,12 @@ Os dois fluxos (2D e 3D) compartilham o mesmo `<script>`, então nomes que exist
 
 ### Seleção, painel e trilha
 - Clique (raycaster) seleciona uma aeronave → abre painel lateral à direita com dados do voo + botões **Seguir** e **Trilha**.
+- Painel lateral (`atualizarPainelConteudo` e funções logo acima dele):
+  - Cabeçalho com callsign/modelo/operador/categoria, alerta de emergência (squawk 7500/7600/7700 ou campo `emergency`) e 4 indicadores (altitude, velocidade, razão vertical, rumo).
+  - **Gráficos de linha de altitude e velocidade x tempo**, SVG desenhado à mão (sem biblioteca), cobrindo o histórico dos chunks (~1h) + os polls ao vivo. Registro dos chunks: `[hex, alt_baro, gs, track, lat, lon, seen_pos, type, flight, messages]` com o instante em `snapshot.now` — por isso dá pra montar a série de altitude/velocidade (os chunks NÃO têm razão vertical). Séries em `seriePorHex` (histórico) e `serieAoVivo`. Cursor + tooltip sincronizados nos dois gráficos (mouse ou setas do teclado); buracos > 2 min quebram a linha. Cor `#4fc3f7` = mesma da trilha selecionada.
+  - Seções recolhíveis com os demais campos do `aircraft.json` (navegação/piloto automático, transponder/sinal, qualidade NIC/NAC/SIL...) e uma tabela dos gráficos (1 linha/min). Só mostra o campo se a aeronave o transmitir.
+  - O esqueleto (com os gráficos) é montado uma vez por aeronave; cabeçalho e seções são refeitos a cada poll. Assim o cursor do gráfico e as seções abertas/fechadas (`secoesAbertas`) sobrevivem à atualização.
+  - Textos do feed passam por `escaparHtml()` antes de ir pro `innerHTML`.
 - Trilha abre **automaticamente** ao selecionar, combinando:
   - Histórico real (até ~1h) reconstruído dos "chunks" de snapshot do tar1090 (`chunks.php` + fetch direto dos `.gz`, CORS já liberado nesses arquivos).
   - Trilha ao vivo acumulada desde que a aba foi aberta (sem limite de pontos — removido o limite artificial anterior).
