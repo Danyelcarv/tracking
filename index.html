@@ -1485,7 +1485,7 @@ function detectarMinhaLocalizacao(centro, raioKm) {
       const { latitude, longitude } = pos.coords;
       if (distKm(centro.lat, centro.lon, latitude, longitude) > raioKm) return; // longe demais, ignora
       const local = paraLocal(latitude, longitude, 0, centro);
-      marcadorMinhaLocalizacao = adicionarMarcadorReferencia(local, '📍 Você', 'rgba(40,80,170,0.9)');
+      marcadorMinhaLocalizacao = adicionarMarcadorReferencia(local, '📍 Minha localização', 'rgba(40,80,170,0.9)');
       if (miniMapa3D) {
         miniMapaMarcadorEu = L.circleMarker([latitude, longitude], { radius: 5, color: '#fff', weight: 1, fillColor: '#2f7fd6', fillOpacity: 1, interactive: false }).addTo(miniMapa3D);
       }
