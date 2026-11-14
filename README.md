@@ -42,6 +42,21 @@ http://localhost/tracking/baixar_modelo_aviao.php (baixa PolyPizza_Airplane.glb,
 
 Esses três passos baixam dados externos uma única vez e salvam localmente — não precisam ser repetidos a cada execução, só se os arquivos gerados forem apagados.
 
+## Publicação online (Cloudflare Pages, gratuito)
+
+No Cloudflare Pages não existe PHP. Os dois proxies usados em tempo de execução têm uma versão em JavaScript na pasta `functions/` (Cloudflare Pages Functions), que responde nos **mesmos caminhos** (`/proxy.php` e `/chunks.php`) — por isso o `index.html` é o mesmo no XAMPP e online, sem nenhuma configuração. O `_routes.json` faz só esses dois caminhos acionarem as funções (o resto é servido como arquivo estático e não conta no limite gratuito).
+
+Configuração (uma vez só):
+
+1. Crie uma conta gratuita em [dash.cloudflare.com](https://dash.cloudflare.com/sign-up) (não pede cartão).
+2. **Workers & Pages → Create → Pages → Connect to Git**, autorize o GitHub e escolha o repositório `tracking`.
+3. Nas configurações de build: **Framework preset:** `None`, **Build command:** vazio, **Build output directory:** `/`.
+4. **Save and Deploy**. O site fica em `https://<nome-do-projeto>.pages.dev`.
+
+Depois disso, todo `git push` no `main` publica automaticamente.
+
+Limite gratuito: 100 mil chamadas de função por dia. Cada visitante com a página aberta consulta `/proxy.php` a cada ~3s (~1.200 chamadas/hora), ou seja, cerca de 80 "visitante-horas" por dia. As funções guardam a resposta por 2s no cache do Cloudflare, então vários visitantes simultâneos não multiplicam as requisições ao trafegoaereo.
+
 ## Arquivos do projeto
 
 | Arquivo | Função |
@@ -49,6 +64,8 @@ Esses três passos baixam dados externos uma única vez e salvam localmente — 
 | `index.html` | Página única: mapa 2D ao vivo (Leaflet) + cena 3D (Three.js). |
 | `proxy.php` | Proxy que busca `aircraft.json` do tar1090 (evita CORS). |
 | `chunks.php` | Proxy do histórico de posições (trilhas de voo no modo 3D). |
+| `functions/proxy.php.js`, `functions/chunks.php.js` | Versões dos dois proxies para o Cloudflare Pages (ver "Publicação online"). |
+| `_routes.json` | Restringe as funções do Cloudflare Pages a `/proxy.php` e `/chunks.php`. |
 | `mapear_aeronaves.php` | Gera `aircraft_map.json` (modelo/fabricante por aeronave). |
 | `mapear_aeroportos.php` | Gera `airports.json` (aeroportos, pistas, elevação). |
 | `baixar_modelo_aviao.php` | Baixa o modelo 3D do avião (`PolyPizza_Airplane.glb`). |

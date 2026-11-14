@@ -23,6 +23,8 @@ Dados ao vivo vêm de `adsb.trafegoaereo.com/tar1090` (feed público ADS-B/MLAT 
 | `chunks.php` | Proxy do índice de histórico (`chunks/chunks.json`) do tar1090 — usado pelo modo 3D para reconstruir trilhas de voo de até ~1h. |
 | `baixar_modelo_aviao.php` | Baixa uma vez o modelo 3D do avião (`PolyPizza_Airplane.glb`) para servir localmente. |
 | `PolyPizza_Airplane.glb` | Modelo 3D do jato comercial usado no modo 3D (ver "Modelo 3D" abaixo). |
+| `functions/proxy.php.js`, `functions/chunks.php.js` | Cloudflare Pages Functions equivalentes a `proxy.php`/`chunks.php`, nos MESMOS caminhos — permitem publicar no Cloudflare Pages (sem PHP) sem mudar o `index.html`. Testadas localmente com `wrangler pages dev`: a função tem precedência sobre o arquivo estático `.php` de mesmo nome. Se mudar algo num proxy PHP, mude também o `.js` correspondente. |
+| `_routes.json` | Faz só `/proxy.php` e `/chunks.php` acionarem as funções no Cloudflare (sem ele, TODA requisição de arquivo estático contaria no limite gratuito de 100 mil/dia). |
 | `contexto.md` | Este arquivo. |
 
 ## Fusão em página única (histórico da mudança)
