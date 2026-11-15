@@ -201,6 +201,9 @@ body.painel-2d-aberto #legend-2d { right: 370px; }
 #painel-conteudo .itinerario .aviso { color: #f2c94c; font-size: 11px; margin-top: 4px; }
 #painel-conteudo .itinerario .fonte { color: #666; font-size: 10px; margin-top: 6px; }
 #painel-conteudo .itinerario .fonte a { color: #8ab4f8; text-decoration: none; }
+#painel-conteudo .itinerario.incerto { background: none; border: 1px dashed #3a3f48; }
+#painel-conteudo .itinerario.incerto .progresso { color: #999; }
+#painel-conteudo .itinerario.incerto .progresso b { color: #bbb; }
 #painel-conteudo .alerta-emergencia {
   margin-top: 10px; padding: 6px 10px; border-radius: 6px; font-weight: 700;
   background: rgba(231,76,60,.18); border: 1px solid #e74c3c; color: #fff;
@@ -2471,11 +2474,22 @@ function htmlItinerario(b) {
   if (info.status !== 'ok') return '<div class="itinerario"><div class="progresso">🗺️ Itinerário não encontrado para este voo</div></div>';
 
   const { origin: o, destination: d, airline } = info.rota;
-  let progresso = '', aviso = '', pct = null;
-  if (b.lat != null && b.lon != null) {
-    const total = distKm(o.latitude, o.longitude, d.latitude, d.longitude);
-    const feito = distKm(o.latitude, o.longitude, b.lat, b.lon);
-    const falta = distKm(b.lat, b.lon, d.latitude, d.longitude);
+  const fonte = `<div class="fonte">${airline && airline.name ? escaparHtml(airline.name) + ' · ' : ''}Rota: <a href="https://www.adsbdb.com" target="_blank" rel="noopener">adsbdb.com</a> (base comunitária)</div>`;
+  const avaliacao = avaliarRota(b, o, d);
+
+  // rota não confere com o voo: não afirma origem/destino em destaque, só registra o que
+  // está cadastrado pra esse número de voo
+  if (!avaliacao.confere) {
+    return `<div class="itinerario incerto">
+      <div class="progresso">🗺️ Rota cadastrada para este número de voo: <b>${escaparHtml(o.iata_code || o.icao_code)} → ${escaparHtml(d.iata_code || d.icao_code)}</b></div>
+      <div class="aviso">Não confere com a trajetória atual (${avaliacao.motivo}) — a companhia provavelmente está usando este número em outra etapa.</div>
+      ${fonte}
+    </div>`;
+  }
+
+  let progresso = '', pct = null;
+  if (avaliacao.feito != null) {
+    const { feito, falta } = avaliacao;
     pct = Math.min(Math.max(feito / (feito + falta), 0), 1);
     progresso = `${fmtNum(feito)} km percorridos · ${fmtNum(falta)} km restantes`;
     const voando = b.alt_baro !== 'ground' && typeof b.gs === 'number' && b.gs > 80;
@@ -2483,17 +2497,42 @@ function htmlItinerario(b) {
       const chegada = Date.now() + falta / (b.gs * 1.852) * 3600000;
       progresso += ` · chegada estimada ~${fmtHora(chegada)}`;
     }
-    // desvio grande em relação à reta origem->destino = rota cadastrada provavelmente errada
-    if (feito + falta > total * 1.3 + 100) aviso = '⚠ A posição atual não bate com esta rota — o itinerário cadastrado pode estar desatualizado.';
   }
 
   return `<div class="itinerario">
     <div class="rota">${htmlPontaRota(o, 'origem')}<div class="seta">✈</div>${htmlPontaRota(d, 'destino')}</div>
     ${pct != null ? `<div class="barra"><span style="width:${(pct * 100).toFixed(1)}%"></span></div>` : ''}
     ${progresso ? `<div class="progresso">${progresso}</div>` : ''}
-    ${aviso ? `<div class="aviso">${aviso}</div>` : ''}
-    <div class="fonte">${airline && airline.name ? escaparHtml(airline.name) + ' · ' : ''}Rota: <a href="https://www.adsbdb.com" target="_blank" rel="noopener">adsbdb.com</a> (base comunitária)</div>
+    ${fonte}
   </div>`;
+}
+
+// rumo inicial (graus, 0 = norte) de um ponto até outro
+function rumoEntre(lat1, lon1, lat2, lon2) {
+  const y = Math.sin((lon2 - lon1) * DEG2RAD) * Math.cos(lat2 * DEG2RAD);
+  const x = Math.cos(lat1 * DEG2RAD) * Math.sin(lat2 * DEG2RAD) - Math.sin(lat1 * DEG2RAD) * Math.cos(lat2 * DEG2RAD) * Math.cos((lon2 - lon1) * DEG2RAD);
+  return (Math.atan2(y, x) / DEG2RAD + 360) % 360;
+}
+
+// A rota cadastrada confere com o voo? As companhias brasileiras reaproveitam o mesmo
+// número de voo em várias etapas, então a base comunitária muitas vezes descreve outra
+// etapa. Dois testes (calibrados com os voos reais do feed):
+//  - posição: longe demais da linha origem->destino;
+//  - direção: em cruzeiro, no meio do caminho, voando a mais de 90° do rumo pro destino
+//    (pega o avião que está em cima da linha, mas indo no sentido contrário).
+// Perto da origem/destino o rumo varia muito (saídas e aproximações), por isso fica de fora.
+function avaliarRota(b, o, d) {
+  if (b.lat == null || b.lon == null) return { confere: true, feito: null, falta: null };
+  const total = distKm(o.latitude, o.longitude, d.latitude, d.longitude);
+  const feito = distKm(o.latitude, o.longitude, b.lat, b.lon);
+  const falta = distKm(b.lat, b.lon, d.latitude, d.longitude);
+  if (feito + falta > total * 1.3 + 100) return { confere: false, motivo: 'o avião está longe do caminho entre os dois aeroportos', feito, falta };
+  const emCruzeiro = typeof b.alt_baro === 'number' && b.alt_baro > 10000 && typeof b.gs === 'number' && b.gs > 150;
+  if (emCruzeiro && b.track != null && feito > 80 && falta > 100) {
+    const dif = Math.abs(((b.track - rumoEntre(b.lat, b.lon, d.latitude, d.longitude) + 540) % 360) - 180);
+    if (dif > 90) return { confere: false, motivo: 'o avião está voando para longe do destino', feito, falta };
+  }
+  return { confere: true, feito, falta };
 }
 
 function montarEsqueletoPainel(hex) {
