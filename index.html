@@ -171,6 +171,19 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; overflow
 }
 #painel-conteudo .acoes button.ativo { background: #4fc3f7; color: #000; border-color: #4fc3f7; }
 #painel-conteudo .subtitulo { color: #aaa; font-size: 12px; margin-top: 2px; line-height: 1.4; }
+/* foto da aeronave (Planespotters.net) — o espaço é reservado antes da foto chegar pra
+   não "pular" o painel; some sem deixar buraco quando não há foto */
+#painel-foto { margin-bottom: 12px; }
+#painel-foto .moldura {
+  width: 100%; aspect-ratio: 3 / 2; border-radius: 8px; overflow: hidden;
+  background: #1a1d23; display: flex; align-items: center; justify-content: center;
+  color: #666; font-size: 12px;
+}
+#painel-foto img { width: 100%; height: 100%; object-fit: cover; display: block; }
+#painel-foto .credito { color: #888; font-size: 11px; margin-top: 4px; }
+#painel-foto .credito a { color: #8ab4f8; text-decoration: none; }
+#painel-foto .credito a:hover { text-decoration: underline; }
+#painel-foto .sem-foto { color: #666; font-size: 11px; }
 #painel-conteudo .alerta-emergencia {
   margin-top: 10px; padding: 6px 10px; border-radius: 6px; font-weight: 700;
   background: rgba(231,76,60,.18); border: 1px solid #e74c3c; color: #fff;
@@ -2274,8 +2287,77 @@ function desenharCursorGraficos() {
   tooltip.style.top = '24px';
 }
 
+// ---- Foto da aeronave (API pública do Planespotters.net, grátis e sem chave) ----
+// Termos de uso (https://www.planespotters.net/photo/api), que este código segue:
+// - crédito do fotógrafo em texto visível ao lado da foto;
+// - a foto é um link (sem rel="nofollow") pra página dela no Planespotters, usando o
+//   `link` devolvido pela API;
+// - a imagem vem direto do endereço devolvido (thumbnail_large), sem proxy, sem salvar e
+//   sem alterar as URLs; a chamada sai do navegador (eles exigem Origin/Referer da página);
+// - a resposta JSON pode ficar em cache por até 24h — aqui só durante a sessão da página.
+const URL_FOTOS_API = 'https://api.planespotters.net/pub/photos/hex/';
+const cacheFotos = new Map(); // hex -> Promise<foto | null>
+
+function buscarFotoAeronave(hex) {
+  if (!cacheFotos.has(hex)) {
+    const busca = fetch(URL_FOTOS_API + encodeURIComponent(hex))
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(dados => {
+        const f = (dados.photos || [])[0];
+        const img = f && (f.thumbnail_large || f.thumbnail);
+        // só aceita endereços https (vêm de fora e vão pra src/href)
+        if (!img || !/^https:\/\//.test(img.src || '') || !/^https:\/\//.test(f.link || '')) return null;
+        return { src: img.src, largura: img.size && img.size.width, altura: img.size && img.size.height, link: f.link, fotografo: f.photographer || '' };
+      });
+    // erro (rede/403) não fica no cache: a próxima seleção tenta de novo
+    busca.catch(() => cacheFotos.delete(hex));
+    cacheFotos.set(hex, busca);
+  }
+  return cacheFotos.get(hex);
+}
+
+function carregarFotoAeronave(hex) {
+  const area = document.getElementById('painel-foto');
+  area.innerHTML = '<div class="moldura">📷 Carregando foto…</div>';
+  buscarFotoAeronave(hex).then(foto => {
+    if (painelHexMontado !== hex) return; // trocou de aeronave enquanto carregava
+    if (!foto) {
+      area.innerHTML = '<div class="sem-foto">📷 Sem foto disponível para esta aeronave</div>';
+      return;
+    }
+    // montado via DOM (textContent/atributos): os dados vêm da API externa
+    area.textContent = '';
+    const linkFoto = document.createElement('a');
+    linkFoto.className = 'moldura';
+    linkFoto.href = foto.link;
+    linkFoto.target = '_blank';
+    linkFoto.rel = 'noopener';
+    linkFoto.title = 'Ver a foto ampliada no Planespotters.net';
+    if (foto.largura && foto.altura) linkFoto.style.aspectRatio = `${foto.largura} / ${foto.altura}`;
+    const img = document.createElement('img');
+    img.src = foto.src;
+    img.alt = 'Foto da aeronave';
+    img.addEventListener('error', () => { if (painelHexMontado === hex) area.innerHTML = '<div class="sem-foto">📷 Não foi possível carregar a foto</div>'; });
+    linkFoto.appendChild(img);
+
+    const credito = document.createElement('div');
+    credito.className = 'credito';
+    credito.append('📷 ', foto.fotografo ? `Foto: ${foto.fotografo} · ` : '');
+    const linkSite = document.createElement('a');
+    linkSite.href = foto.link;
+    linkSite.target = '_blank';
+    linkSite.rel = 'noopener';
+    linkSite.textContent = 'Planespotters.net';
+    credito.appendChild(linkSite);
+    area.append(linkFoto, credito);
+  }).catch(() => {
+    if (painelHexMontado === hex) area.innerHTML = '<div class="sem-foto">📷 Foto indisponível no momento</div>';
+  });
+}
+
 function montarEsqueletoPainel(hex) {
   document.getElementById('painel-conteudo').innerHTML = `
+    <div id="painel-foto"></div>
     <div id="painel-cabecalho"></div>
     <div id="painel-graficos" tabindex="0" aria-label="Gráficos de altitude e velocidade. Use as setas para percorrer os pontos.">
       <div class="titulo-grafico">Altitude <small>(pés)</small></div>
@@ -2287,6 +2369,7 @@ function montarEsqueletoPainel(hex) {
     <div id="painel-secoes"></div>`;
   painelHexMontado = hex;
   hoverGraficoT = null;
+  carregarFotoAeronave(hex);
 
   const area = document.getElementById('painel-graficos');
   area.addEventListener('pointermove', ev => {
