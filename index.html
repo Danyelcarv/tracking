@@ -1102,12 +1102,29 @@ const RE_TIPO_GRANDE = /^(B74\w|B76\w|B77\w|B78\w|A30\w|A310|A33\w|A34\w|A35\w|A
 const RE_TIPO_JATINHO = /^(C25\w|C5[0-6]\w|C6[58]\w|C700|C750|E50P|E55P|E545|E550|E35L|LJ\d\d|GLF\d|GLEX|GL5T|GL7T|G150|G280|GALX|ASTR|CL30|CL35|CL60|F2TH|F900|FA\d\w|H25\w|BE40|PC24|HDJT|PRM1|SF50|EA50|MU30|WW24)$/;
 const RE_TIPO_LINHA = /^(A19N|A20N|A21N|A22\d|A31\d|A32\d|B37M|B38M|B39M|B3XM|B71\w|B72\w|B73\w|B75\w|E1[79]\w|E29\w|E75\w|E135|E140|E145|CRJ\w|AT4\w|AT7\w|DH8\w|F50|F70|F100|MD8\w|MD90|B46\w|RJ\w\w|SU95|BCS\d|C130|C30J|KC39|E390|SF34|SB20|E120|D328|B190)$/;
 
+// Nenhuma das duas fontes é 100% confiável: há transponder mal configurado (visto no feed:
+// um Cessna Citation transmitindo categoria A7 = helicóptero) e cadastro errado/antigo.
+// Por isso: o tipo cadastrado vale mais que a categoria transmitida, e "helicóptero" ainda
+// precisa ser fisicamente possível — nenhum helicóptero civil voa a mais de ~200 nós ou
+// acima de ~20.000 pés. Quem já passou disso fica marcado (não volta a ser helicóptero
+// quando desacelera pra pousar).
+const HELI_GS_MAX = 200, HELI_ALT_MAX = 20000;
+const desempenhoDeAviao = new Set(); // hex que já voou rápido/alto demais pra helicóptero
+
+function podeSerHelicoptero(a) {
+  if ((typeof a.gs === 'number' && a.gs > HELI_GS_MAX) || (typeof a.alt_baro === 'number' && a.alt_baro > HELI_ALT_MAX)) desempenhoDeAviao.add(a.hex);
+  return !desempenhoDeAviao.has(a.hex);
+}
+
 function categoria3D(a, modelo) {
   const tipo = ((modelo && modelo.t) || '').toUpperCase();
-  if (a.category === 'A7' || RE_TIPO_HELI.test(tipo)) return 'heli';
+  const heliPossivel = podeSerHelicoptero(a);
+  if (RE_TIPO_HELI.test(tipo) && heliPossivel) return 'heli';
   if (RE_TIPO_GRANDE.test(tipo)) return 'grande';
   if (RE_TIPO_JATINHO.test(tipo)) return 'jatinho';
   if (RE_TIPO_LINHA.test(tipo)) return 'plane';
+  // daqui pra baixo o tipo não decidiu (desconhecido ou fora das listas): vale a categoria transmitida
+  if (a.category === 'A7' && heliPossivel) return 'heli';
   if (a.category === 'A5') return 'grande';
   if (a.category === 'A3' || a.category === 'A4') return 'plane';
   if (a.category === 'A2') return 'jatinho'; // 7–34 t: na prática, jatos executivos
@@ -2846,6 +2863,7 @@ document.getElementById('btn-voltar').addEventListener('click', () => {
   tamAeronaveAtual = null;
   aircraftData.clear();
   ultimoRumo3D.clear();
+  desempenhoDeAviao.clear();
   trilhas.clear();
   historicoPorHex.clear();
   seriePorHex.clear();
