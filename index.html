@@ -158,6 +158,9 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; overflow
   transform: translateX(100%); transition: transform .22s ease; overflow-y: auto;
 }
 #painel-detalhe.aberto { transform: translateX(0); }
+/* painel aberto no mapa 2D: controles do Leaflet (camadas, 📍) e a legenda saem de baixo dele */
+body.painel-2d-aberto .leaflet-right { right: 360px; }
+body.painel-2d-aberto #legend-2d { right: 370px; }
 #painel-detalhe b { color: #4fc3f7; }
 #painel-fechar {
   position: absolute; top: 14px; right: 14px; background: #222; color: #fff;
@@ -304,10 +307,6 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; overflow
     <div id="lista-aeronaves-corpo"></div>
   </div>
   <div id="mini-mapa-3d"></div>
-  <div id="painel-detalhe">
-    <button id="painel-fechar" title="Fechar">✕</button>
-    <div id="painel-conteudo"></div>
-  </div>
   <div class="legend" id="legend-3d">
     <div><span class="dot" style="background:#e74c3c;"></span> Solo</div>
     <div><span class="dot" style="background:#f39c12;"></span> 0–10.000 pés</div>
@@ -315,6 +314,12 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; overflow
     <div><span class="dot" style="background:#2ecc71;"></span> > 30.000 pés</div>
     <div><span class="dot" style="background:#9b59b6;"></span> MLAT</div>
   </div>
+</div>
+
+<!-- painel lateral da aeronave selecionada: fora da #cena3d porque serve aos dois modos (2D e 3D) -->
+<div id="painel-detalhe">
+  <button id="painel-fechar" title="Fechar">✕</button>
+  <div id="painel-conteudo"></div>
 </div>
 
 <script>
@@ -374,16 +379,80 @@ const lastPosicoes = new Map();
 const CACHE_TTL = 90000;
 
 let markers = [];
-let hexPopupAberto = null;
 let seguindoHex = null;
 let seguindoCallsign = '';
+// clicar num avião do mapa 2D abre o MESMO painel lateral do 3D (no lugar do antigo popup)
+let hexSelecionado2D = null;
+let dados2D = new Map(); // hex -> { hex, modelo, bruto } do último poll (o painel lê daqui)
+let mostrarTrilha2D = true;
+let trilha2D = null; // polyline Leaflet da trilha da aeronave selecionada
 
 function limparMarcadores() {
-  markers.forEach(m => {
-    if (m.isPopupOpen()) hexPopupAberto = m.hex;
-    map.removeLayer(m);
-  });
+  markers.forEach(m => map.removeLayer(m));
   markers = [];
+}
+
+function seguir2D(hex, rotulo) {
+  seguindoHex = hex;
+  seguindoCallsign = rotulo;
+  document.getElementById('seguir-callsign').textContent = rotulo;
+  document.getElementById('seguir-bar').style.display = 'flex';
+  const m = markers.find(m => m.hex === hex);
+  if (m) map.panTo(m.getLatLng(), { animate: true, duration: 1 });
+  if (hexSelecionado2D) atualizarPainelConteudo();
+}
+
+function pararSeguir2D() {
+  seguindoHex = null;
+  document.getElementById('seguir-bar').style.display = 'none';
+  if (hexSelecionado2D) atualizarPainelConteudo();
+}
+
+function selecionar2D(hex) {
+  if (!dados2D.has(hex)) return;
+  hexSelecionado2D = hex;
+  document.body.classList.add('painel-2d-aberto');
+  document.getElementById('painel-detalhe').classList.add('aberto');
+  // histórico (~1h) pros gráficos/trilha: baixado sob demanda e reaproveitado por 3 min
+  if (historicoStatus !== 'carregando' && Date.now() - historicoCarregadoEm > 3 * 60000) carregarHistorico(null);
+  atualizarPainelConteudo();
+  atualizarTrilha2D();
+  destacarMarcador2D();
+}
+
+function fecharSelecao2D() {
+  hexSelecionado2D = null;
+  painelHexMontado = null;
+  hoverGraficoT = null;
+  document.getElementById('painel-detalhe').classList.remove('aberto');
+  document.body.classList.remove('painel-2d-aberto');
+  atualizarTrilha2D();
+  destacarMarcador2D();
+}
+
+// brilho azul em volta do avião selecionado (mesma cor da trilha e dos gráficos)
+function destacarMarcador2D() {
+  markers.forEach(m => {
+    const el = m.getElement();
+    if (el) el.style.filter = m.hex === hexSelecionado2D ? 'drop-shadow(0 0 3px #4fc3f7) drop-shadow(0 0 6px #4fc3f7)' : '';
+    m.setZIndexOffset(m.hex === hexSelecionado2D ? 1000 : 0);
+  });
+}
+
+// trilha da aeronave selecionada no mapa 2D: histórico (~1h) + pontos ao vivo, quebrada
+// nos buracos longos sem dado (igual aos gráficos)
+function atualizarTrilha2D() {
+  if (trilha2D) { map.removeLayer(trilha2D); trilha2D = null; }
+  if (!hexSelecionado2D || !mostrarTrilha2D) return;
+  const trechos = [];
+  serieVoo(hexSelecionado2D).filter(p => p.lat != null && p.lon != null).forEach(p => {
+    const ultimo = trechos[trechos.length - 1];
+    if (!ultimo || p.t - ultimo.tFim > GRAF_QUEBRA_MS) trechos.push({ pts: [[p.lat, p.lon]], tFim: p.t });
+    else { ultimo.pts.push([p.lat, p.lon]); ultimo.tFim = p.t; }
+  });
+  const linhas = trechos.filter(tr => tr.pts.length > 1).map(tr => tr.pts);
+  if (!linhas.length) return;
+  trilha2D = L.polyline(linhas, { color: '#4fc3f7', weight: 3, opacity: 0.85, interactive: false }).addTo(map);
 }
 
 function corPorAltitude(alt) {
@@ -477,37 +546,6 @@ function iconeAeronaveMini(track, corHex) {
   });
 }
 
-function infoAeronave(a) {
-  const alt = a.alt_baro === 'ground' ? 'Solo' : (a.alt_baro != null ? a.alt_baro.toLocaleString() + ' pés' : '—');
-  const gs = a.gs != null ? a.gs.toFixed(1) + ' kn' : '—';
-  const track = a.track != null ? a.track.toFixed(1) + '°' : '—';
-  const squawk = a.squawk || '—';
-  const emergencia = a.emergency && a.emergency !== 'none' ? `🚨 ${a.emergency}` : '';
-  const tipo = a.type || '—';
-  const rssi = a.rssi != null ? a.rssi.toFixed(1) + ' dB' : '—';
-  const msg = a.messages != null ? a.messages.toLocaleString() : '—';
-  const voo = a.flight ? a.flight.trim() : '—';
-  const modelo = a._modelo;
-  const modeloStr = modelo ? `${modelo.m} (${modelo.f})` : '—';
-
-  return `
-    <div style="font-family:monospace">
-      <b style="font-size:15px;color:#1a1a2e;">✈ ${voo}${a._stale ? ' <span style="color:#888;font-weight:400;font-size:11px;">(cache)</span>' : ''}</b>
-      <hr style="margin:4px 0;border-color:#eee;">
-      <b>ICAO:</b> ${a.hex} &nbsp;|&nbsp; <b>Tipo:</b> ${tipo}<br>
-      <b>Modelo:</b> ${modeloStr}<br>
-      <b>Altitude:</b> ${alt}<br>
-      <b>Velocidade:</b> ${gs}<br>
-      <b>Rumo:</b> ${track}<br>
-      <b>Categoria:</b> ${a.category || '—'}<br>
-      <b>Squawk:</b> ${squawk} ${emergencia}<br>
-      <b>Sinal:</b> ${rssi}<br>
-      <b>Mensagens:</b> ${msg}<br>
-      <b>Lat:</b> ${a.lat != null ? a.lat.toFixed(4) : '—'}<br>
-      <b>Lon:</b> ${a.lon != null ? a.lon.toFixed(4) : '—'}
-    </div>`;
-}
-
 async function atualizar() {
   try {
     const resp = await fetch(URL + '?_=' + Date.now());
@@ -550,21 +588,9 @@ async function atualizar() {
     semPosicao.forEach(a => {
       const cache = lastPosicoes.get(a.hex);
       if (cache && (agoraMs - cache.time) < CACHE_TTL) {
-        comCache.push({
-          hex: a.hex,
-          flight: a.flight,
-          alt_baro: a.alt_baro,
-          gs: a.gs,
-          track: cache.track,
-          type: a.type,
-          category: cache.category,
-          squawk: a.squawk,
-          rssi: a.rssi,
-          messages: a.messages,
-          lat: cache.lat,
-          lon: cache.lon,
-          _stale: true
-        });
+        // registro completo do feed (o painel lateral mostra todos os campos) + a última
+        // posição/rumo conhecidos
+        comCache.push({ ...a, track: cache.track, category: cache.category, lat: cache.lat, lon: cache.lon, _stale: true });
       }
     });
 
@@ -575,11 +601,14 @@ async function atualizar() {
     if (totalExibido === 0) return;
 
     limparMarcadores();
+    dados2D = new Map();
 
     [...comPosicao, ...comCache].forEach(a => {
       a._modelo = aircraftMap ? aircraftMap[a.hex] : null;
+      dados2D.set(a.hex, { hex: a.hex, modelo: a._modelo, bruto: a });
       const icon = iconeAeronave(a.alt_baro, a.track, a.type, a.flight, a._stale, a.category, a._modelo, a.gs);
-      const marker = L.marker([a.lat, a.lon], { icon }).bindPopup(infoAeronave(a));
+      const marker = L.marker([a.lat, a.lon], { icon });
+      marker.on('click', () => selecionar2D(a.hex));
       const rotulo = a.flight ? a.flight.trim() : a.hex;
       const altLabel = a.alt_baro === 'ground' ? 'Solo' : (a.alt_baro != null ? a.alt_baro + 'pés' : '—');
       const velLabel = a.gs != null ? a.gs.toFixed(0) + 'kn' : '';
@@ -587,28 +616,30 @@ async function atualizar() {
         direction: 'top', offset: [0, -14], opacity: .85
       });
       marker.hex = a.hex;
-      marker.on('dblclick', () => {
-        seguindoHex = a.hex;
-        seguindoCallsign = rotulo;
-        document.getElementById('seguir-callsign').textContent = rotulo;
-        document.getElementById('seguir-bar').style.display = 'flex';
-      });
+      marker.on('dblclick', () => seguir2D(a.hex, rotulo));
       markers.push(marker);
       marker.addTo(map);
     });
-
-    if (hexPopupAberto) {
-      const m = markers.find(m => m.hex === hexPopupAberto);
-      if (m) m.openPopup();
-      hexPopupAberto = null;
-    }
+    destacarMarcador2D();
 
     if (seguindoHex) {
       const m = markers.find(m => m.hex === seguindoHex);
       if (m) map.panTo(m.getLatLng(), { animate: true, duration: 1 });
-      else {
-        seguindoHex = null;
-        document.getElementById('seguir-bar').style.display = 'none';
+      else pararSeguir2D();
+    }
+
+    // painel lateral aberto: acumula o ponto ao vivo e atualiza painel/trilha (ou fecha,
+    // se a aeronave sumiu do feed)
+    if (hexSelecionado2D) {
+      const sel = dados2D.get(hexSelecionado2D);
+      if (!sel) {
+        fecharSelecao2D();
+      } else {
+        const b = sel.bruto;
+        if (!serieAoVivo.has(b.hex)) serieAoVivo.set(b.hex, []);
+        serieAoVivo.get(b.hex).push(pontoSerie(data.now ? data.now * 1000 : agoraMs, b.alt_baro, b.gs, b._stale ? null : b.lat, b._stale ? null : b.lon));
+        atualizarPainelConteudo();
+        atualizarTrilha2D();
       }
     }
 
@@ -742,20 +773,14 @@ document.getElementById('btn-dist').addEventListener('click', function() {
   map.getContainer().style.cursor = 'crosshair';
 });
 
-document.getElementById('seguir-cancelar').addEventListener('click', function() {
-  seguindoHex = null;
-  document.getElementById('seguir-bar').style.display = 'none';
-});
+document.getElementById('seguir-cancelar').addEventListener('click', pararSeguir2D);
 
 map.on('click', function(e) {
   if (modo3DAtivo) {
     definirCentro3D(e.latlng.lat, e.latlng.lng, `Ponto customizado (${e.latlng.lat.toFixed(3)}, ${e.latlng.lng.toFixed(3)})`);
     return;
   }
-  if (seguindoHex) {
-    seguindoHex = null;
-    document.getElementById('seguir-bar').style.display = 'none';
-  }
+  if (seguindoHex) pararSeguir2D();
   if (estadoDist !== 'marcando') return;
   if (pontoMarcado) map.removeLayer(pontoMarcado);
   if (sweepLayer) { map.removeLayer(sweepLayer); sweepLayer = null; }
@@ -928,6 +953,8 @@ document.getElementById('modo3d-entrar').addEventListener('click', () => {
   modo3DAtivo = false;
   limparSelecao3D();
   clearInterval(intervalo2D);
+  if (hexSelecionado2D) fecharSelecao2D(); // o painel passa a servir a cena 3D
+  seguindoHex = null;
 
   document.getElementById('map').style.display = 'none';
   document.getElementById('info-bar').style.display = 'none';
@@ -955,6 +982,8 @@ let aircraftData = new Map(); // hex -> dados + posição local
 let trilhas = new Map(); // hex -> [Vector3...] (acumulado ao vivo desde que a cena abriu)
 let historicoPorHex = new Map(); // hex -> [Vector3...] (reconstruído dos chunks de histórico do provedor)
 let historicoStatus = 'ocioso'; // 'ocioso' | 'carregando' | 'pronto' | 'indisponivel'
+let historicoCarregadoEm = 0; // ms; o mapa 2D rebaixa o histórico se ficou velho
+let geracaoHistorico = 0; // descarta um carregamento que terminou depois de trocar de modo
 // séries no tempo pros gráficos do painel: hex -> [{ t (ms), alt (pés), gs (kn) }]
 let seriePorHex = new Map(); // dos chunks de histórico (até ~1h antes de abrir a cena)
 let serieAoVivo = new Map(); // acumulada a cada poll desde que a cena abriu
@@ -1647,13 +1676,18 @@ function iniciarCena3D(centro, raioKm) {
 // Reconstrói a trilha completa (até ~1h) a partir dos "chunks" de histórico que o
 // próprio provedor (tar1090) guarda — não é um endpoint por aeronave, é uma lista de
 // snapshots periódicos de TODAS as aeronaves que baixamos uma vez e indexamos por hex.
+// `centro` = centro da cena 3D (monta também as posições 3D da trilha); null no mapa 2D,
+// que só precisa das séries (gráficos + trilha em lat/lon).
 async function carregarHistorico(centro) {
+  const geracao = ++geracaoHistorico;
+  const obsoleto = () => geracao !== geracaoHistorico || (centro && centroAtivo !== centro);
   historicoStatus = 'carregando';
   try {
     const resp = await fetch('chunks.php?_=' + Date.now());
     const indice = await resp.json();
     const nomes = indice.chunks || [];
-    if (centroAtivo !== centro || nomes.length === 0) { historicoStatus = 'indisponivel'; return; }
+    if (obsoleto()) return;
+    if (nomes.length === 0) { historicoStatus = 'indisponivel'; return; }
 
     const resultados = await Promise.all(nomes.map(nome =>
       fetch(`https://adsb.trafegoaereo.com/tar1090/chunks/${nome}`)
@@ -1661,7 +1695,7 @@ async function carregarHistorico(centro) {
         .catch(() => null)
     ));
 
-    if (centroAtivo !== centro) return; // saiu da cena enquanto baixava
+    if (obsoleto()) return; // saiu da cena / trocou de modo enquanto baixava
 
     const novoHistorico = new Map();
     const novaSerie = new Map();
@@ -1673,9 +1707,9 @@ async function carregarHistorico(centro) {
           const [hex, alt_baro, gs, , lat, lon] = ac;
           if (snapshot.now) {
             if (!novaSerie.has(hex)) novaSerie.set(hex, []);
-            novaSerie.get(hex).push(pontoSerie(snapshot.now * 1000, alt_baro, gs));
+            novaSerie.get(hex).push(pontoSerie(snapshot.now * 1000, alt_baro, gs, lat, lon));
           }
-          if (lat == null || lon == null) return;
+          if (!centro || lat == null || lon == null) return;
           if (!novoHistorico.has(hex)) novoHistorico.set(hex, []);
           novoHistorico.get(hex).push(paraLocal(lat, lon, alt_baro, centro));
         });
@@ -1684,12 +1718,18 @@ async function carregarHistorico(centro) {
     historicoPorHex = novoHistorico;
     seriePorHex = novaSerie;
     historicoStatus = 'pronto';
+    historicoCarregadoEm = Date.now();
 
-    if (hexSelecionado && mostrarTrilha) desenharTrilha(hexSelecionado);
-    if (hexSelecionado) atualizarPainelConteudo();
+    if (centro) {
+      if (hexSelecionado && mostrarTrilha) desenharTrilha(hexSelecionado);
+      if (hexSelecionado) atualizarPainelConteudo();
+    } else if (hexSelecionado2D) {
+      atualizarPainelConteudo();
+      atualizarTrilha2D();
+    }
   } catch (err) {
     console.error('Erro ao carregar histórico de voo:', err);
-    historicoStatus = 'indisponivel';
+    if (geracao === geracaoHistorico) historicoStatus = 'indisponivel';
   }
 }
 
@@ -1800,7 +1840,7 @@ async function atualizarDados3D() {
       });
 
       if (!serieAoVivo.has(a.hex)) serieAoVivo.set(a.hex, []);
-      serieAoVivo.get(a.hex).push(pontoSerie(instanteMs, a.alt_baro, a.gs));
+      serieAoVivo.get(a.hex).push(pontoSerie(instanteMs, a.alt_baro, a.gs, a.lat, a.lon));
 
       if (!trilhas.has(a.hex)) trilhas.set(a.hex, []);
       const trilha = trilhas.get(a.hex);
@@ -1935,7 +1975,7 @@ function marcarItemListaAtivo(hex) {
 function textoStatusHistorico() {
   if (historicoStatus === 'carregando') return '📜 Carregando histórico de voo…';
   if (historicoStatus === 'pronto') {
-    const n = (historicoPorHex.get(hexSelecionado) || []).length;
+    const n = (seriePorHex.get(hexDoPainel()) || []).length;
     return n > 0 ? `📜 Histórico carregado (~1h, ${n} pontos)` : '📜 Sem histórico anterior nesta janela de ~1h';
   }
   if (historicoStatus === 'indisponivel') return '📜 Histórico indisponível (mostrando só a sessão atual)';
@@ -1964,14 +2004,21 @@ function rumoCardinal(graus) {
   return ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(((graus % 360) + 360) % 360 / 45) % 8];
 }
 
-// ponto da série dos gráficos; 'ground' vira altitude 0 (solo)
-function pontoSerie(t, altBaro, gs) {
+// ponto da série dos gráficos (e da trilha do mapa 2D); 'ground' vira altitude 0 (solo)
+function pontoSerie(t, altBaro, gs, lat, lon) {
   return {
     t,
     alt: altBaro === 'ground' ? 0 : (typeof altBaro === 'number' ? altBaro : null),
     gs: typeof gs === 'number' ? gs : null,
+    lat: typeof lat === 'number' ? lat : null,
+    lon: typeof lon === 'number' ? lon : null,
   };
 }
+
+// o painel lateral serve aos dois modos; estas funções escolhem a fonte conforme o modo ativo
+function em3D() { return document.getElementById('cena3d').style.display === 'block'; }
+function hexDoPainel() { return em3D() ? hexSelecionado : hexSelecionado2D; }
+function dadosDoPainel(hex) { return em3D() ? aircraftData.get(hex) : dados2D.get(hex); }
 
 // histórico (chunks, até ~1h) + ao vivo, em ordem de tempo e sem pontos repetidos
 function serieVoo(hex) {
@@ -2043,10 +2090,11 @@ function htmlCabecalho(a, b) {
     <div style="font-size:18px;"><b>✈ ${escaparHtml(voo || b.hex.toUpperCase())}</b></div>
     <div class="subtitulo">${escaparHtml(modeloTxt)}${m && m.o ? ' · ' + escaparHtml(m.o) : ''}</div>
     <div class="subtitulo">${escaparHtml(detalhes.join(' · '))}</div>
+    ${b._stale ? '<div class="subtitulo">☁ Sem posição nova agora — mostrando a última conhecida</div>' : ''}
     ${alerta}
     <div class="acoes">
-      <button id="acao-seguir" class="${seguindoHex3D === hexSelecionado ? 'ativo' : ''}">🎥 Seguir</button>
-      <button id="acao-trilha" class="${mostrarTrilha ? 'ativo' : ''}">〰 Trilha</button>
+      <button id="acao-seguir" class="${(em3D() ? seguindoHex3D : seguindoHex) === b.hex ? 'ativo' : ''}">🎥 Seguir</button>
+      <button id="acao-trilha" class="${(em3D() ? mostrarTrilha : mostrarTrilha2D) ? 'ativo' : ''}">〰 Trilha</button>
     </div>
     <div class="kpis">
       <div class="kpi"><div class="rotulo">Altitude</div><div class="valor">${alt}</div></div>
@@ -2416,20 +2464,33 @@ document.getElementById('painel-conteudo').addEventListener('toggle', ev => {
 }, true);
 
 function atualizarPainelConteudo() {
-  const a = aircraftData.get(hexSelecionado);
+  const hex = hexDoPainel();
+  const a = dadosDoPainel(hex);
   if (!a) return;
-  if (painelHexMontado !== hexSelecionado) montarEsqueletoPainel(hexSelecionado);
+  if (painelHexMontado !== hex) montarEsqueletoPainel(hex);
   const b = a.bruto || a;
   document.getElementById('painel-cabecalho').innerHTML = htmlCabecalho(a, b);
   document.getElementById('painel-secoes').innerHTML = htmlSecoes(a, b);
-  desenharGraficos(hexSelecionado);
+  desenharGraficos(hex);
 
+  // Seguir/Trilha fazem a coisa equivalente em cada modo
   document.getElementById('acao-seguir').onclick = () => {
-    if (seguindoHex3D === hexSelecionado) pararSeguir(); else comecarSeguir(hexSelecionado);
+    if (em3D()) {
+      if (seguindoHex3D === hex) pararSeguir(); else comecarSeguir(hex);
+    } else if (seguindoHex === hex) {
+      pararSeguir2D();
+    } else {
+      seguir2D(hex, b.flight ? b.flight.trim() : hex);
+    }
   };
   document.getElementById('acao-trilha').onclick = () => {
-    mostrarTrilha = !mostrarTrilha;
-    if (mostrarTrilha) desenharTrilha(hexSelecionado); else removerTrilha();
+    if (em3D()) {
+      mostrarTrilha = !mostrarTrilha;
+      if (mostrarTrilha) desenharTrilha(hex); else removerTrilha();
+    } else {
+      mostrarTrilha2D = !mostrarTrilha2D;
+      atualizarTrilha2D();
+    }
     atualizarPainelConteudo();
   };
 }
@@ -2566,7 +2627,7 @@ function fecharSelecao() {
 }
 
 document.getElementById('r3d-seguir-cancelar').addEventListener('click', pararSeguir);
-document.getElementById('painel-fechar').addEventListener('click', fecharSelecao);
+document.getElementById('painel-fechar').addEventListener('click', () => { if (em3D()) fecharSelecao(); else fecharSelecao2D(); });
 document.getElementById('btn-rotulos-aeronaves').addEventListener('click', alternarRotulosAeronaves);
 document.getElementById('btn-trilhas-todas').addEventListener('click', alternarTodasTrilhas);
 
@@ -2594,6 +2655,8 @@ document.getElementById('btn-voltar').addEventListener('click', () => {
   seriePorHex.clear();
   serieAoVivo.clear();
   historicoStatus = 'ocioso';
+  historicoCarregadoEm = 0;
+  geracaoHistorico++; // um carregamento ainda em andamento da cena 3D é descartado
 
   document.getElementById('cena3d').style.display = 'none';
   document.getElementById('footer-3d-credit').style.display = 'none';

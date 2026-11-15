@@ -70,6 +70,7 @@ Os dois fluxos (2D e 3D) compartilham o mesmo `<script>`, então nomes que exist
   - Seções recolhíveis com os demais campos do `aircraft.json` (navegação/piloto automático, transponder/sinal, qualidade NIC/NAC/SIL...) e uma tabela dos gráficos (1 linha/min). Só mostra o campo se a aeronave o transmitir.
   - O esqueleto (com os gráficos) é montado uma vez por aeronave; cabeçalho e seções são refeitos a cada poll. Assim o cursor do gráfico e as seções abertas/fechadas (`secoesAbertas`) sobrevivem à atualização.
   - Textos do feed passam por `escaparHtml()` antes de ir pro `innerHTML`.
+  - **Serve aos dois modos**: `#painel-detalhe` fica fora da `#cena3d`. No mapa 2D, clicar num avião chama `selecionar2D` (substituiu o antigo popup do Leaflet); `em3D()` / `hexDoPainel()` / `dadosDoPainel()` escolhem a fonte (3D: `hexSelecionado`/`aircraftData`; 2D: `hexSelecionado2D`/`dados2D`). No 2D, "Seguir" = o mesmo seguir do duplo-clique (`seguir2D`) e "Trilha" = polyline Leaflet (`atualizarTrilha2D`, com lat/lon guardados em cada ponto da série). O histórico dos chunks é baixado sob demanda no 2D (`carregarHistorico(null)`, reaproveitado por 3 min); `geracaoHistorico` descarta um carregamento que termine depois de trocar de modo.
 - Trilha abre **automaticamente** ao selecionar, combinando:
   - Histórico real (até ~1h) reconstruído dos "chunks" de snapshot do tar1090 (`chunks.php` + fetch direto dos `.gz`, CORS já liberado nesses arquivos).
   - Trilha ao vivo acumulada desde que a aba foi aberta (sem limite de pontos — removido o limite artificial anterior).
