@@ -187,6 +187,20 @@ body.painel-2d-aberto #legend-2d { right: 370px; }
 #painel-foto .credito a { color: #8ab4f8; text-decoration: none; }
 #painel-foto .credito a:hover { text-decoration: underline; }
 #painel-foto .sem-foto { color: #666; font-size: 11px; }
+/* itinerário (origem -> destino) dos voos comerciais */
+#painel-conteudo .itinerario { margin-top: 12px; background: #1a1d23; border-radius: 8px; padding: 10px 12px; }
+#painel-conteudo .itinerario .rota { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+#painel-conteudo .itinerario .ponta { min-width: 0; flex: 1; }
+#painel-conteudo .itinerario .ponta.destino { text-align: right; }
+#painel-conteudo .itinerario .codigo { color: #fff; font-size: 20px; font-weight: 700; line-height: 1.1; }
+#painel-conteudo .itinerario .cidade { color: #aaa; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#painel-conteudo .itinerario .seta { color: #4fc3f7; font-size: 16px; padding-top: 2px; }
+#painel-conteudo .itinerario .barra { position: relative; height: 4px; background: #2a2e35; border-radius: 2px; margin: 10px 0 6px; }
+#painel-conteudo .itinerario .barra span { position: absolute; left: 0; top: 0; bottom: 0; background: #4fc3f7; border-radius: 2px; }
+#painel-conteudo .itinerario .progresso { color: #ccc; font-size: 11px; }
+#painel-conteudo .itinerario .aviso { color: #f2c94c; font-size: 11px; margin-top: 4px; }
+#painel-conteudo .itinerario .fonte { color: #666; font-size: 10px; margin-top: 6px; }
+#painel-conteudo .itinerario .fonte a { color: #8ab4f8; text-decoration: none; }
 #painel-conteudo .alerta-emergencia {
   margin-top: 10px; padding: 6px 10px; border-radius: 6px; font-weight: 700;
   background: rgba(231,76,60,.18); border: 1px solid #e74c3c; color: #fff;
@@ -2092,6 +2106,7 @@ function htmlCabecalho(a, b) {
     <div class="subtitulo">${escaparHtml(detalhes.join(' · '))}</div>
     ${b._stale ? '<div class="subtitulo">☁ Sem posição nova agora — mostrando a última conhecida</div>' : ''}
     ${alerta}
+    ${htmlItinerario(b)}
     <div class="acoes">
       <button id="acao-seguir" class="${(em3D() ? seguindoHex3D : seguindoHex) === b.hex ? 'ativo' : ''}">🎥 Seguir</button>
       <button id="acao-trilha" class="${(em3D() ? mostrarTrilha : mostrarTrilha2D) ? 'ativo' : ''}">〰 Trilha</button>
@@ -2401,6 +2416,84 @@ function carregarFotoAeronave(hex) {
   }).catch(() => {
     if (painelHexMontado === hex) area.innerHTML = '<div class="sem-foto">📷 Foto indisponível no momento</div>';
   });
+}
+
+// ---- Itinerário (origem -> destino) dos voos comerciais, pela API pública do adsbdb.com ----
+// O feed ADS-B só traz o callsign (ex.: AZU2995); a rota vem da base comunitária de rotas
+// (David Taylor / Jim Mason) servida pelo adsbdb — grátis, sem chave, CORS liberado. Os
+// dados só são exibidos (não copiados/armazenados), com crédito, como pede a base.
+// A rota é a "cadastrada" pro número do voo e pode estar desatualizada: o painel avisa
+// quando a posição atual do avião não bate com ela.
+const URL_ROTAS_API = 'https://api.adsbdb.com/v0/callsign/';
+const rotasPorCallsign = new Map(); // callsign -> { status: 'carregando'|'ok'|'sem'|'erro', rota }
+
+function callsignComercial(b) {
+  const c = (b.flight || '').trim().toUpperCase();
+  // 3 letras da companhia (ICAO) + número do voo; matrículas (PR-XXX, PSAAA) ficam de fora
+  return /^[A-Z]{3}\d{1,4}[A-Z]{0,2}$/.test(c) ? c : null;
+}
+
+function garantirRota(callsign) {
+  const atual = rotasPorCallsign.get(callsign);
+  if (atual && !(atual.status === 'erro' && Date.now() - atual.em > 60000)) return; // erro: tenta de novo após 1 min
+  rotasPorCallsign.set(callsign, { status: 'carregando' });
+  fetch(URL_ROTAS_API + encodeURIComponent(callsign))
+    .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+    .then(dados => {
+      const fr = dados && dados.response && dados.response.flightroute;
+      const valido = p => p && typeof p.latitude === 'number' && typeof p.longitude === 'number';
+      if (!fr || !valido(fr.origin) || !valido(fr.destination)) { rotasPorCallsign.set(callsign, { status: 'sem' }); return; }
+      rotasPorCallsign.set(callsign, { status: 'ok', rota: fr });
+    })
+    .catch(() => rotasPorCallsign.set(callsign, { status: 'erro', em: Date.now() }))
+    .finally(() => {
+      const d = dadosDoPainel(hexDoPainel());
+      if (d && callsignComercial(d.bruto || d) === callsign) atualizarPainelConteudo();
+    });
+}
+
+function htmlPontaRota(p, classe) {
+  const codigo = p.iata_code || p.icao_code || '—';
+  const cidade = [p.municipality, p.iata_code && p.icao_code ? p.icao_code : null].filter(Boolean).join(' · ');
+  return `<div class="ponta ${classe}" title="${escaparHtml(p.name || '')}">
+    <div class="codigo">${escaparHtml(codigo)}</div>
+    <div class="cidade">${escaparHtml(cidade || p.name || '')}</div>
+  </div>`;
+}
+
+function htmlItinerario(b) {
+  const callsign = callsignComercial(b);
+  if (!callsign) return '';
+  garantirRota(callsign);
+  const info = rotasPorCallsign.get(callsign) || { status: 'carregando' };
+  if (info.status === 'carregando') return '<div class="itinerario"><div class="progresso">🗺️ Buscando itinerário…</div></div>';
+  if (info.status === 'erro') return '<div class="itinerario"><div class="progresso">🗺️ Itinerário indisponível no momento</div></div>';
+  if (info.status !== 'ok') return '<div class="itinerario"><div class="progresso">🗺️ Itinerário não encontrado para este voo</div></div>';
+
+  const { origin: o, destination: d, airline } = info.rota;
+  let progresso = '', aviso = '', pct = null;
+  if (b.lat != null && b.lon != null) {
+    const total = distKm(o.latitude, o.longitude, d.latitude, d.longitude);
+    const feito = distKm(o.latitude, o.longitude, b.lat, b.lon);
+    const falta = distKm(b.lat, b.lon, d.latitude, d.longitude);
+    pct = Math.min(Math.max(feito / (feito + falta), 0), 1);
+    progresso = `${fmtNum(feito)} km percorridos · ${fmtNum(falta)} km restantes`;
+    const voando = b.alt_baro !== 'ground' && typeof b.gs === 'number' && b.gs > 80;
+    if (voando && falta > 5) {
+      const chegada = Date.now() + falta / (b.gs * 1.852) * 3600000;
+      progresso += ` · chegada estimada ~${fmtHora(chegada)}`;
+    }
+    // desvio grande em relação à reta origem->destino = rota cadastrada provavelmente errada
+    if (feito + falta > total * 1.3 + 100) aviso = '⚠ A posição atual não bate com esta rota — o itinerário cadastrado pode estar desatualizado.';
+  }
+
+  return `<div class="itinerario">
+    <div class="rota">${htmlPontaRota(o, 'origem')}<div class="seta">✈</div>${htmlPontaRota(d, 'destino')}</div>
+    ${pct != null ? `<div class="barra"><span style="width:${(pct * 100).toFixed(1)}%"></span></div>` : ''}
+    ${progresso ? `<div class="progresso">${progresso}</div>` : ''}
+    ${aviso ? `<div class="aviso">${aviso}</div>` : ''}
+    <div class="fonte">${airline && airline.name ? escaparHtml(airline.name) + ' · ' : ''}Rota: <a href="https://www.adsbdb.com" target="_blank" rel="noopener">adsbdb.com</a> (base comunitária)</div>
+  </div>`;
 }
 
 function montarEsqueletoPainel(hex) {
