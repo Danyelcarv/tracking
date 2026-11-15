@@ -288,7 +288,7 @@ body.painel-2d-aberto #legend-2d { right: 370px; }
   <button id="modo3d-cancelar">✕ Cancelar</button>
 </div>
 
-<div id="footer">Dados: <a href="https://trafegoaereo.com.br" target="_blank" rel="noopener">trafegoaereo.com.br</a> via <a href="https://github.com/wiedehopf/tar1090" target="_blank" rel="noopener">tar1090</a> / <a href="https://github.com/adsbxchange/readsb" target="_blank" rel="noopener">readsb</a><span id="footer-3d-credit" style="display:none"> · Modelo 3D: <a href="https://poly.pizza/m/8ciDd9k8wha" target="_blank" rel="noopener">"Airplane" via Poly Pizza (CC-BY 3.0)</a></span></div>
+<div id="footer">Dados: <a href="https://trafegoaereo.com.br" target="_blank" rel="noopener">trafegoaereo.com.br</a> via <a href="https://github.com/wiedehopf/tar1090" target="_blank" rel="noopener">tar1090</a> / <a href="https://github.com/adsbxchange/readsb" target="_blank" rel="noopener">readsb</a><span id="footer-3d-credit" style="display:none"> · Modelos 3D via Poly Pizza (CC-BY 3.0), adaptados: <a href="https://poly.pizza/m/8ciDd9k8wha" target="_blank" rel="noopener">"Airplane"</a> e <a href="https://poly.pizza/m/bgUY8zN2Bq9" target="_blank" rel="noopener">"Jet"</a> (Poly by Google), <a href="https://poly.pizza/m/49CLof4tP2V" target="_blank" rel="noopener">"Boeing 747"</a> (Miha Lunar), <a href="https://poly.pizza/m/7cvx6ex-xfL" target="_blank" rel="noopener">"Small Airplane"</a> (Vojtěch Balák), <a href="https://poly.pizza/m/eb7b31pjGtQ" target="_blank" rel="noopener">"Helicopter"</a> (jeremy)</span></div>
 
 <div id="seguir-bar">🛰 <span id="seguir-callsign"></span> <button id="seguir-cancelar" title="Parar de seguir">✕</button></div>
 
@@ -1020,51 +1020,112 @@ let pointerDownPos = null;
 let mostrarRotulosAeronaves = false;
 let rotulosAeronaves = new Map(); // hex -> { sprite, chave } (rótulo de altitude/velocidade/rumo)
 
-// modelo real de jato comercial ("Airplane", poly.pizza, CC-BY 3.0), baixado localmente
-// via baixar_modelo_aviao.php, SEM textura (só a geometria, recolorida por altitude).
-// Normalizado: comprimento (Z) = 1 unidade, nariz em -Z, centralizado — assim cada cena
-// só escala pelo tamAeronave da vez. Se não carregar, cai de volta pra geometria
-// procedural (criarGeometriaAviao).
-let modeloAviaoGeometria = null;
+// Modelos 3D por categoria de aeronave (todos do poly.pizza, CC-BY 3.0), SEM textura (só
+// a geometria, recolorida por altitude). Cada geometria é normalizada ao carregar:
+// comprimento (Z) = 1 unidade, nariz em -Z, centralizada — a cena escala por
+// tamAeronave * escala. Enquanto um modelo não carrega (ou se falhar), a categoria usa o
+// do avião comercial ou, em último caso, a geometria procedural (criarGeometriaAviao).
+// - plane:   "Airplane" (Poly by Google), baixado por baixar_modelo_aviao.php
+// - grande:  "Boeing 747" (Miha Lunar) — arquivo já endireitado/normalizado
+// - jatinho: "Jet" (Poly by Google) — sem a textura original (era 1,7 MB)
+// - helice:  "Small Airplane" (Vojtěch Balák)
+// - heli:    "Helicopter" (jeremy)
+const MODELOS_3D = {
+  plane:   { arquivo: 'PolyPizza_Airplane.glb', escala: 1, narizEmMaisZ: true },
+  grande:  { arquivo: 'modelo_aviao_grande.glb', escala: 1.5 },
+  jatinho: { arquivo: 'modelo_jatinho.glb', escala: 0.65 },
+  helice:  { arquivo: 'modelo_aviao_helice.glb', escala: 0.55 },
+  heli:    { arquivo: 'modelo_helicoptero.glb', escala: 0.55 },
+};
+const geometriasModelo = {}; // categoria -> geometria normalizada (quando carregada)
 let tamAeronaveAtual = null; // escala usada pela cena 3D aberta no momento (se houver)
 
-(function carregarModeloAviao() {
-  try {
-    new THREE.GLTFLoader().load('PolyPizza_Airplane.glb', (gltf) => {
-      const partes = [];
-      gltf.scene.traverse(obj => {
-        if (obj.isMesh && obj.geometry) {
-          const g = obj.geometry.clone();
-          obj.updateWorldMatrix(true, false);
-          g.applyMatrix4(obj.matrixWorld);
-          partes.push(g);
-        }
-      });
-      if (!partes.length) return;
-      const geo = THREE.BufferGeometryUtils.mergeBufferGeometries(partes, false);
-      geo.computeBoundingBox();
-      const centro = new THREE.Vector3();
-      geo.boundingBox.getCenter(centro);
-      geo.translate(-centro.x, -centro.y, -centro.z);
-      const tamanho = new THREE.Vector3();
-      geo.boundingBox.getSize(tamanho);
-      geo.rotateY(Math.PI); // modelo original tem o nariz em +Z; nossa convenção usa -Z (norte)
-      geo.scale(1 / tamanho.z, 1 / tamanho.z, 1 / tamanho.z);
-      modeloAviaoGeometria = geo;
-      aplicarModeloAviaoNaCenaAtual(); // o download é assíncrono; se a cena já tiver sido
-                                        // montada com o fallback procedural, troca agora
-    }, undefined, (err) => console.warn('Modelo 3D do avião não carregou, usando geometria procedural:', err));
-  } catch (err) {
-    console.warn('GLTFLoader indisponível, usando geometria procedural:', err);
-  }
+(function carregarModelos3D() {
+  Object.keys(MODELOS_3D).forEach(categoria => {
+    const cfg = MODELOS_3D[categoria];
+    try {
+      new THREE.GLTFLoader().load(cfg.arquivo, (gltf) => {
+        const partes = [];
+        gltf.scene.traverse(obj => {
+          if (obj.isMesh && obj.geometry) {
+            // só a posição: os modelos têm atributos diferentes (uv, cor) e o merge exige iguais
+            const g = new THREE.BufferGeometry();
+            const origem = obj.geometry.index ? obj.geometry.toNonIndexed() : obj.geometry;
+            g.setAttribute('position', origem.attributes.position.clone());
+            obj.updateWorldMatrix(true, false);
+            g.applyMatrix4(obj.matrixWorld);
+            partes.push(g);
+          }
+        });
+        if (!partes.length) return;
+        const geo = THREE.BufferGeometryUtils.mergeBufferGeometries(partes, false);
+        geo.computeBoundingBox();
+        const centro = new THREE.Vector3();
+        geo.boundingBox.getCenter(centro);
+        geo.translate(-centro.x, -centro.y, -centro.z);
+        const tamanho = new THREE.Vector3();
+        geo.boundingBox.getSize(tamanho);
+        if (cfg.narizEmMaisZ) geo.rotateY(Math.PI); // nossa convenção usa nariz em -Z (norte)
+        geo.scale(1 / tamanho.z, 1 / tamanho.z, 1 / tamanho.z);
+        geo.computeVertexNormals();
+        geometriasModelo[categoria] = geo;
+        aplicarModelosNaCenaAtual(); // o download é assíncrono; se a cena já tiver sido
+                                     // montada com um fallback, troca agora
+      }, undefined, (err) => console.warn(`Modelo 3D "${cfg.arquivo}" não carregou, usando fallback:`, err));
+    } catch (err) {
+      console.warn('GLTFLoader indisponível, usando geometria procedural:', err);
+    }
+  });
 })();
 
-function aplicarModeloAviaoNaCenaAtual() {
-  if (!modeloAviaoGeometria || !tamAeronaveAtual || !baldes.plane) return;
-  const geometriaAntiga = Object.values(baldes.plane)[0].mesh.geometry;
-  const novaGeo = modeloAviaoGeometria.clone().scale(tamAeronaveAtual, tamAeronaveAtual, tamAeronaveAtual);
-  Object.values(baldes.plane).forEach(balde => { balde.mesh.geometry = novaGeo; });
-  geometriaAntiga.dispose();
+// geometria (já na escala da cena) de uma categoria: modelo próprio > avião comercial > procedural
+function geometriaDaCategoria(categoria, tamAeronave) {
+  const tam = tamAeronave * MODELOS_3D[categoria].escala;
+  const base = geometriasModelo[categoria] || geometriasModelo.plane;
+  return base ? base.clone().scale(tam, tam, tam) : criarGeometriaAviao(tam);
+}
+
+function aplicarModelosNaCenaAtual() {
+  if (!tamAeronaveAtual) return;
+  Object.keys(baldes).forEach(categoria => {
+    const geometriaAntiga = Object.values(baldes[categoria])[0].mesh.geometry;
+    const novaGeo = geometriaDaCategoria(categoria, tamAeronaveAtual);
+    Object.values(baldes[categoria]).forEach(balde => { balde.mesh.geometry = novaGeo; });
+    geometriaAntiga.dispose();
+  });
+}
+
+// Qual modelo usar pra cada aeronave: primeiro o código de tipo ICAO (do aircraft_map.json,
+// só aeronaves brasileiras), depois a categoria ADS-B que a própria aeronave transmite.
+const RE_TIPO_HELI = /^(R22|R44|R66|B06T?|B47\w?|B204|B205|B206|B212|B214|B222|B230|B407|B412|B427|B429|B430|B505|B525|AS\d\w|EC\d\d|H\d{2,3}|A109|A119|A129|A139|A149|A169|A189|AW\d+|S61|S64|S70|S76|S92|UH1|UH60|MD52|MD60|EXPL|BK17|BO05|G2CA|EN28|EN48|GAZL|ALO\d|LAMA|PUMA|NH90|KA\d\d|MI\d+|S300|S330|H269|CH47)$/;
+const RE_TIPO_GRANDE = /^(B74\w|B76\w|B77\w|B78\w|A30\w|A310|A33\w|A34\w|A35\w|A38\w|MD11|DC10|IL76|IL96|A124|A225|C17|C5M?|L101|KC10|K35R|A400|BLCF)$/;
+const RE_TIPO_JATINHO = /^(C25\w|C5[0-6]\w|C6[58]\w|C700|C750|E50P|E55P|E545|E550|E35L|LJ\d\d|GLF\d|GLEX|GL5T|GL7T|G150|G280|GALX|ASTR|CL30|CL35|CL60|F2TH|F900|FA\d\w|H25\w|BE40|PC24|HDJT|PRM1|SF50|EA50|MU30|WW24)$/;
+const RE_TIPO_LINHA = /^(A19N|A20N|A21N|A22\d|A31\d|A32\d|B37M|B38M|B39M|B3XM|B71\w|B72\w|B73\w|B75\w|E1[79]\w|E29\w|E75\w|E135|E140|E145|CRJ\w|AT4\w|AT7\w|DH8\w|F50|F70|F100|MD8\w|MD90|B46\w|RJ\w\w|SU95|BCS\d|C130|C30J|KC39|E390|SF34|SB20|E120|D328|B190)$/;
+
+function categoria3D(a, modelo) {
+  const tipo = ((modelo && modelo.t) || '').toUpperCase();
+  if (a.category === 'A7' || RE_TIPO_HELI.test(tipo)) return 'heli';
+  if (RE_TIPO_GRANDE.test(tipo)) return 'grande';
+  if (RE_TIPO_JATINHO.test(tipo)) return 'jatinho';
+  if (RE_TIPO_LINHA.test(tipo)) return 'plane';
+  if (a.category === 'A5') return 'grande';
+  if (a.category === 'A3' || a.category === 'A4') return 'plane';
+  if (a.category === 'A2') return 'jatinho'; // 7–34 t: na prática, jatos executivos
+  if (a.category === 'A1' || /^B[14]$/.test(a.category || '')) return 'helice'; // leve, planador, ultraleve
+  // tipo conhecido fora das listas acima = aviação geral (monomotores, bimotores, agrícolas...)
+  return tipo ? 'helice' : 'plane';
+}
+
+// rumo (graus) pra orientar o modelo. Parada (ex.: helicóptero pairando), a aeronave não
+// tem "track" confiável: usa a proa, ou mantém a última orientação em vez de virar pro norte.
+const ultimoRumo3D = new Map(); // hex -> graus
+function rumoParaModelo(a) {
+  const parado = typeof a.gs === 'number' && a.gs < 3;
+  let rumo = !parado && a.track != null ? a.track : null;
+  if (rumo == null) rumo = a.true_heading != null ? a.true_heading : a.mag_heading;
+  if (rumo == null) rumo = ultimoRumo3D.has(a.hex) ? ultimoRumo3D.get(a.hex) : (a.track || 0);
+  ultimoRumo3D.set(a.hex, rumo);
+  return rumo;
 }
 
 function distKm(lat1, lon1, lat2, lon2) {
@@ -1663,19 +1724,19 @@ function iniciarCena3D(centro, raioKm) {
     adicionarMarcadorReferencia(paraLocal(ap.lat, ap.lon, 0, centro), icao, 'rgba(0,0,0,0.8)');
   });
 
-  // modelo único (real, com fallback procedural) pra todas as aeronaves — nariz sempre
-  // aponta para norte/-Z em track 0
-  const geometriaAviao = modeloAviaoGeometria
-    ? modeloAviaoGeometria.clone().scale(tamAeronave, tamAeronave, tamAeronave)
-    : criarGeometriaAviao(tamAeronave);
-
-  baldes = { plane: {} };
-  Object.keys(CORES).forEach(nomeCor => {
-    const mat = new THREE.MeshLambertMaterial({ color: CORES[nomeCor], side: THREE.DoubleSide });
-    const mesh = new THREE.InstancedMesh(geometriaAviao, mat, MAX_POR_BALDE);
-    mesh.count = 0;
-    scene.add(mesh);
-    baldes.plane[nomeCor] = { mesh, indiceParaHex: [] };
+  // um conjunto de malhas instanciadas por categoria de modelo (avião comercial, grande,
+  // jatinho, hélice, helicóptero) x faixa de cor — nariz sempre aponta para norte/-Z em rumo 0
+  baldes = {};
+  Object.keys(MODELOS_3D).forEach(categoria => {
+    const geometria = geometriaDaCategoria(categoria, tamAeronave);
+    baldes[categoria] = {};
+    Object.keys(CORES).forEach(nomeCor => {
+      const mat = new THREE.MeshLambertMaterial({ color: CORES[nomeCor], side: THREE.DoubleSide });
+      const mesh = new THREE.InstancedMesh(geometria, mat, MAX_POR_BALDE);
+      mesh.count = 0;
+      scene.add(mesh);
+      baldes[categoria][nomeCor] = { mesh, indiceParaHex: [] };
+    });
   });
 
   window.addEventListener('resize', aoRedimensionar);
@@ -1770,7 +1831,9 @@ function aproximarCameraDe(hex) {
   if (!a || !camera) return;
   const offsetDe = camera.position.clone().sub(controls.target);
   const esfera = new THREE.Spherical().setFromVector3(offsetDe);
-  esfera.radius = Math.max(tamAeronaveAtual * DIST_SELECAO_EM_TAMANHOS, controls.minDistance * 1.2);
+  // modelos menores (helicóptero, hélice, jatinho) pedem a câmera mais perto pra ficarem do mesmo tamanho na tela
+  const escalaModelo = MODELOS_3D[categoria3D(a.bruto || a, a.modelo)].escala;
+  esfera.radius = Math.max(tamAeronaveAtual * escalaModelo * DIST_SELECAO_EM_TAMANHOS, controls.minDistance * 1.2);
   esfera.phi = Math.min(Math.max(esfera.phi, 0.5), 1.25); // nem de cima demais, nem rasante
   const offsetPara = new THREE.Vector3().setFromSpherical(esfera);
   transicaoCamera = { t0: performance.now(), alvoDe: controls.target.clone(), offsetDe, offsetPara };
@@ -1821,12 +1884,12 @@ async function atualizarDados3D() {
     naArea.forEach(a => {
       const pos = paraLocal(a.lat, a.lon, a.alt_baro, centroAtivo);
       const modelo = aircraftMap ? aircraftMap[a.hex] : null;
-      const categoria = 'plane';
+      const categoria = categoria3D(a, modelo);
       const cor = altBucket(a);
       const i = contagem[categoria][cor];
       if (i >= MAX_POR_BALDE) return;
 
-      const yaw = -((a.track || 0) * DEG2RAD);
+      const yaw = -(rumoParaModelo(a) * DEG2RAD);
       quat.setFromEuler(new THREE.Euler(0, yaw, 0));
       matriz.compose(pos, quat, escala);
       const balde = baldes[categoria][cor];
@@ -2782,6 +2845,7 @@ document.getElementById('btn-voltar').addEventListener('click', () => {
   centroAtivo = null;
   tamAeronaveAtual = null;
   aircraftData.clear();
+  ultimoRumo3D.clear();
   trilhas.clear();
   historicoPorHex.clear();
   seriePorHex.clear();

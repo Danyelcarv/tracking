@@ -23,6 +23,7 @@ Dados ao vivo vêm de `adsb.trafegoaereo.com/tar1090` (feed público ADS-B/MLAT 
 | `chunks.php` | Proxy do índice de histórico (`chunks/chunks.json`) do tar1090 — usado pelo modo 3D para reconstruir trilhas de voo de até ~1h. |
 | `baixar_modelo_aviao.php` | Baixa uma vez o modelo 3D do avião (`PolyPizza_Airplane.glb`) para servir localmente. |
 | `PolyPizza_Airplane.glb` | Modelo 3D do jato comercial usado no modo 3D (ver "Modelo 3D" abaixo). |
+| `modelo_aviao_grande.glb`, `modelo_jatinho.glb`, `modelo_aviao_helice.glb`, `modelo_helicoptero.glb` | Modelos 3D das outras categorias de aeronave, já adaptados (ver "Modelo 3D" abaixo, item 7). |
 | `functions/proxy.php.js`, `functions/chunks.php.js` | Cloudflare Pages Functions equivalentes a `proxy.php`/`chunks.php`, nos MESMOS caminhos — permitem publicar no Cloudflare Pages (sem PHP) sem mudar o `index.html`. Testadas localmente com `wrangler pages dev`: a função tem precedência sobre o arquivo estático `.php` de mesmo nome. Se mudar algo num proxy PHP, mude também o `.js` correspondente. |
 | `_routes.json` | Faz só `/proxy.php` e `/chunks.php` acionarem as funções no Cloudflare (sem ele, TODA requisição de arquivo estático contaria no limite gratuito de 100 mil/dia). |
 | `contexto.md` | Este arquivo. |
@@ -88,6 +89,7 @@ Os dois fluxos (2D e 3D) compartilham o mesmo `<script>`, então nomes que exist
 4. Nova busca encontrou candidatos reais em **poly.pizza** (CC-BY 3.0). O modelo **"Airplane"** (`https://poly.pizza/m/8ciDd9k8wha`) foi confirmado visualmente como um jato comercial de verdade (asas em flecha, motor sob a asa, cauda).
 5. **Decisão final**: usar só esse modelo (`PolyPizza_Airplane.glb`), sem textura (geometria pura, recolorida por altitude como as outras), para todas as aeronaves — simplificando de volta pra uma única categoria `plane` (removida a diferenciação por tipo).
 6. Créditos no rodapé da página (licença CC-BY 3.0 exige atribuição).
+7. **Modelos por tipo de aeronave** (substitui a decisão 5 de "um modelo só"): helicópteros apareciam como avião e, parados, davam a impressão de avião caindo na vertical. Agora há 5 categorias em `MODELOS_3D`: `plane` (comercial, o modelo de antes), `grande` (Boeing 747), `jatinho`, `helice` (tipo Cessna) e `heli`, todos do poly.pizza (CC-BY 3.0). Os 4 novos `.glb` (`modelo_*.glb`) já estão adaptados no repositório: só geometria (o "Jet" original tinha 1,7 MB de textura), nariz em -Z, comprimento 1; o 747 vinha inclinado no arquivo e foi endireitado pelo plano de simetria. `categoria3D()` escolhe o modelo: primeiro pelo código de tipo ICAO (`aircraft_map.json`, só aeronaves brasileiras; listas `RE_TIPO_*`), depois pela categoria ADS-B transmitida (A7 = helicóptero, A5 = grande, A3/A4 = comercial, A2 = jatinho, A1 = hélice); sem nenhum dos dois, avião comercial. Cada categoria tem sua escala e um conjunto de `InstancedMesh` por cor (`baldes[categoria][cor]`). `rumoParaModelo()` usa a proa ou mantém a última orientação quando a aeronave está parada (helicóptero pairando não vira pro norte).
 
 ## Bugs encontrados e corrigidos (histórico)
 

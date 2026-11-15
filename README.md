@@ -72,6 +72,7 @@ Limite gratuito: 100 mil chamadas de função por dia. Cada visitante com a pág
 | `mapear_aeroportos.php` | Gera `airports.json` (aeroportos, pistas, elevação). |
 | `baixar_modelo_aviao.php` | Baixa o modelo 3D do avião (`PolyPizza_Airplane.glb`). |
 | `aircraft_map.json`, `airports.json`, `PolyPizza_Airplane.glb` | Dados/assets já gerados, prontos para uso. |
+| `modelo_aviao_grande.glb`, `modelo_jatinho.glb`, `modelo_aviao_helice.glb`, `modelo_helicoptero.glb` | Modelos 3D dos outros tipos de aeronave (já adaptados: só geometria, nariz pra frente, mesmo tamanho). |
 | `contexto.md` | Documento de referência da arquitetura do projeto (histórico técnico). |
 
 ## Créditos
@@ -80,4 +81,9 @@ Limite gratuito: 100 mil chamadas de função por dia. Cada visitante com a pág
 - Base de aeronaves: [OpenSky Network](https://opensky-network.org/)
 - Aeroportos/pistas: [OurAirports](https://ourairports.com/)
 - Tiles de mapa: OpenStreetMap, Esri
-- Modelo 3D do avião: "Airplane" por [Poly Pizza](https://poly.pizza/m/8ciDd9k8wha) (CC-BY 3.0)
+- Modelos 3D (todos via Poly Pizza, CC-BY 3.0, adaptados — sem textura, reorientados e redimensionados):
+  - Avião comercial: ["Airplane"](https://poly.pizza/m/8ciDd9k8wha) por Poly by Google
+  - Avião grande: ["Boeing 747"](https://poly.pizza/m/49CLof4tP2V) por Miha Lunar
+  - Jatinho: ["Jet"](https://poly.pizza/m/bgUY8zN2Bq9) por Poly by Google
+  - Avião a hélice: ["Small Airplane"](https://poly.pizza/m/7cvx6ex-xfL) por Vojtěch Balák
+  - Helicóptero: ["Helicopter"](https://poly.pizza/m/eb7b31pjGtQ) por jeremy
