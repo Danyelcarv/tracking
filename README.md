@@ -73,6 +73,8 @@ Limite gratuito: 100 mil chamadas de função por dia. Cada visitante com a pág
 | `baixar_modelo_aviao.php` | Baixa o modelo 3D do avião (`PolyPizza_Airplane.glb`). |
 | `aircraft_map.json`, `airports.json`, `PolyPizza_Airplane.glb` | Dados/assets já gerados, prontos para uso. |
 | `modelo_aviao_grande.glb`, `modelo_jatinho.glb`, `modelo_aviao_helice.glb`, `modelo_helicoptero.glb` | Modelos 3D dos outros tipos de aeronave (já adaptados: só geometria, nariz pra frente, mesmo tamanho). |
+| `tutorial/passo1..7.webp` | Imagens do tutorial do Modo 3D (prints do próprio site, com o elemento de cada passo destacado). |
+| `ferramentas/gerar_imagens_tutorial.js` | Regera as imagens do tutorial a partir do site local (`npm install puppeteer-core` + `node ferramentas/gerar_imagens_tutorial.js`). Rodar de novo se a interface mudar. |
 | `contexto.md` | Documento de referência da arquitetura do projeto (histórico técnico). |
 
 ## Créditos

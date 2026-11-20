@@ -20,6 +20,8 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; overflow
   padding: 8px 20px; border-radius: 8px; font-size: 14px;
   display: flex; gap: 20px; align-items: center;
   backdrop-filter: blur(4px);
+  /* left:50% só dá metade da tela pra barra e os textos quebravam linha (mesma correção do #r3d-info-bar) */
+  width: max-content; max-width: calc(100vw - 120px); white-space: nowrap;
 }
 #info-bar .badge { color: #f2c94c; font-weight: bold; }
 #info-bar button {
@@ -40,6 +42,43 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; overflow
   padding: 4px 10px; font-size: 11px; backdrop-filter: blur(4px);
 }
 #footer a { color: #8ab4f8; text-decoration: none; }
+/* ---- Tutorial do Modo 3D (modal com passo a passo) ---- */
+#tutorial-3d {
+  position: fixed; inset: 0; z-index: 3000; background: rgba(0,0,0,.7);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+#tutorial-3d[hidden] { display: none; }
+#tutorial-3d .tutorial-caixa {
+  position: relative; width: 760px; max-width: 100%; max-height: 100%; overflow-y: auto;
+  background: #0e1014; color: #ddd; border: 1px solid #333; border-radius: 12px;
+  padding: 20px 22px 16px; box-shadow: 0 10px 40px rgba(0,0,0,.6); font-size: 14px;
+}
+#tutorial-fechar {
+  position: absolute; top: 12px; right: 12px; background: #222; color: #fff;
+  border: 1px solid #555; border-radius: 6px; width: 30px; height: 30px; cursor: pointer;
+}
+#tutorial-contador { color: #4fc3f7; font-size: 12px; font-weight: 600; }
+#tutorial-titulo { color: #fff; font-size: 19px; margin: 2px 40px 12px 0; }
+#tutorial-imagem {
+  display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover;
+  border-radius: 8px; background: #1a1d23; border: 1px solid #2a2e35;
+}
+#tutorial-texto { margin-top: 12px; line-height: 1.55; min-height: 66px; }
+#tutorial-texto ul { margin: 6px 0 0 18px; }
+#tutorial-texto b { color: #fff; }
+#tutorial-3d .tutorial-rodape { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; }
+#tutorial-3d .tutorial-rodape button {
+  background: #222; color: #fff; border: 1px solid #555; border-radius: 6px;
+  padding: 7px 14px; font-size: 13px; cursor: pointer; min-width: 110px;
+}
+#tutorial-3d .tutorial-rodape button:disabled { visibility: hidden; }
+#tutorial-proximo { background: #4fc3f7 !important; color: #000 !important; border-color: #4fc3f7 !important; font-weight: 700; }
+#tutorial-pontos { display: flex; gap: 6px; }
+#tutorial-pontos button {
+  min-width: 0 !important; width: 10px; height: 10px; padding: 0 !important; border-radius: 50% !important;
+  background: #444 !important; border: none !important;
+}
+#tutorial-pontos button.ativo { background: #4fc3f7 !important; }
 #footer a:hover { text-decoration: underline; }
 .leaflet-popup-content { font-size: 13px; line-height: 1.5; min-width: 200px; }
 .leaflet-popup-content strong { color: #1a1a2e; }
@@ -277,6 +316,7 @@ body.painel-2d-aberto #legend-2d { right: 370px; }
   <span>📍 <span class="badge" id="com-posicao">0</span> com posição</span>
   <span>🔄 <span class="badge" id="ultima-atualizacao">—</span></span>
   <button id="btn-modo-3d">🌐 Modo 3D</button>
+  <button class="btn-tutorial-3d" title="Como usar o Modo 3D">❓</button>
 </div>
 
 <div id="map"></div>
@@ -316,6 +356,7 @@ body.painel-2d-aberto #legend-2d { right: 370px; }
     <span>📏 raio <b id="raio-ativo">—</b> km</span>
     <button id="btn-rotulos-aeronaves" title="Mostrar altitude, velocidade e rumo em cada aeronave">🏷️ Rótulos</button>
     <button id="btn-trilhas-todas" title="Mostrar a trilha de todas as aeronaves">〰 Trilhas</button>
+    <button class="btn-tutorial-3d" title="Como usar o Modo 3D">❓</button>
   </div>
   <div id="r3d-seguir-bar">🛰 <span id="r3d-seguir-callsign"></span> <button id="r3d-seguir-cancelar" title="Parar de seguir">✕</button></div>
   <div id="bussola"><div id="bussola-fita"></div><div id="bussola-ponteiro"></div></div>
@@ -330,6 +371,22 @@ body.painel-2d-aberto #legend-2d { right: 370px; }
     <div><span class="dot" style="background:#3498db;"></span> 10k–30.000 pés</div>
     <div><span class="dot" style="background:#2ecc71;"></span> > 30.000 pés</div>
     <div><span class="dot" style="background:#9b59b6;"></span> MLAT</div>
+  </div>
+</div>
+
+<!-- tutorial do Modo 3D (passo a passo com imagens): abre sozinho na 1ª vez e pelos botões ❓ -->
+<div id="tutorial-3d" role="dialog" aria-modal="true" aria-labelledby="tutorial-titulo" hidden>
+  <div class="tutorial-caixa">
+    <button id="tutorial-fechar" title="Fechar (Esc)" aria-label="Fechar tutorial">✕</button>
+    <div id="tutorial-contador"></div>
+    <h2 id="tutorial-titulo"></h2>
+    <img id="tutorial-imagem" alt="">
+    <div id="tutorial-texto"></div>
+    <div class="tutorial-rodape">
+      <button id="tutorial-anterior">◀ Anterior</button>
+      <div id="tutorial-pontos"></div>
+      <button id="tutorial-proximo">Próximo ▶</button>
+    </div>
   </div>
 </div>
 
@@ -962,6 +1019,117 @@ function cancelarModo3D() {
 }
 
 document.getElementById('btn-modo-3d').addEventListener('click', ativarModo3D);
+
+// ---------- Tutorial do Modo 3D ----------
+// Abre sozinho só na PRIMEIRA visita ao site (marca no localStorage) e, depois, pelos
+// botões ❓ (na barra do 2D e na do 3D). As imagens são prints do próprio site, em
+// tutorial/ (geradas por ferramentas/gerar_imagens_tutorial.js — refazer se a interface mudar).
+const PASSOS_TUTORIAL_3D = [
+  {
+    titulo: 'Abra o Modo 3D',
+    imagem: 'tutorial/passo1.webp',
+    texto: 'No mapa, clique em <b>🌐 Modo 3D</b> na barra do topo. O mapa continua ao vivo, com os aviões se movendo, enquanto você escolhe a área que quer ver em 3D.',
+  },
+  {
+    titulo: 'Escolha o centro da área',
+    imagem: 'tutorial/passo2.webp',
+    texto: 'Clique num <b>aeroporto</b> (🛬 com o código, ex.: SBGR) ou em <b>qualquer ponto do mapa</b>. Um marcador verde mostra o centro escolhido.'
+      + '<ul><li>Aeroportos trazem as <b>pistas reais</b> na cena.</li><li>Num ponto livre, a altura do terreno é a do aeroporto mais próximo.</li></ul>',
+  },
+  {
+    titulo: 'Escolha o raio e entre',
+    imagem: 'tutorial/passo3.webp',
+    texto: 'No painel de baixo, escolha o <b>raio</b> (30 a 150 km): raios menores mostram mais detalhe e imagem de satélite mais nítida; raios maiores mostram mais aviões. Depois clique em <b>Entrar na visualização 3D ▶</b>.',
+  },
+  {
+    titulo: 'Navegue pela cena',
+    imagem: 'tutorial/passo4.webp',
+    texto: '<ul><li><b>Arraste</b> com o botão esquerdo para girar a câmera.</li><li><b>Botão direito</b> (ou dois dedos) para mover.</li><li><b>Roda do mouse</b> (ou pinça) para zoom.</li></ul>'
+      + 'A cor de cada aeronave indica a altitude (legenda no canto). A <b>bússola</b> no topo mostra para onde você está olhando e o <b>mini-mapa</b> mostra a área.',
+  },
+  {
+    titulo: 'Clique numa aeronave',
+    imagem: 'tutorial/passo5.webp',
+    texto: 'Clique num avião na cena ou na <b>lista à esquerda</b>: a câmera se aproxima e abre o <b>painel</b> com foto, itinerário, gráficos de altitude e velocidade e todos os dados do voo.'
+      + ' Para fechar, use o <b>✕</b> ou dê um <b>duplo-clique</b> num espaço vazio.',
+  },
+  {
+    titulo: 'Seguir e trilha',
+    imagem: 'tutorial/passo6.webp',
+    texto: '<ul><li><b>🎥 Seguir</b>: a câmera acompanha a aeronave (você ainda pode girar e dar zoom).</li><li><b>〰 Trilha</b>: mostra o caminho percorrido na última hora.</li></ul>',
+  },
+  {
+    titulo: 'Rótulos, trilhas de todos e voltar',
+    imagem: 'tutorial/passo7.webp',
+    texto: '<ul><li><b>🏷️ Rótulos</b>: mostra voo, altitude, velocidade e rumo sobre cada aeronave.</li><li><b>〰 Trilhas</b>: desenha a trilha de todas as aeronaves da área.</li><li><b>◀ Voltar ao mapa 2D</b> (canto superior esquerdo) sai do 3D.</li></ul>'
+      + 'Para rever este tutorial, clique em <b>❓</b>.',
+  },
+];
+const CHAVE_TUTORIAL_VISTO = 'tutorial3dVisto';
+let passoTutorial = 0;
+let focoAntesTutorial = null;
+
+function mostrarPassoTutorial(i) {
+  passoTutorial = Math.min(Math.max(i, 0), PASSOS_TUTORIAL_3D.length - 1);
+  const p = PASSOS_TUTORIAL_3D[passoTutorial];
+  const ultimo = passoTutorial === PASSOS_TUTORIAL_3D.length - 1;
+  document.getElementById('tutorial-contador').textContent = `Passo ${passoTutorial + 1} de ${PASSOS_TUTORIAL_3D.length}`;
+  document.getElementById('tutorial-titulo').textContent = p.titulo;
+  const img = document.getElementById('tutorial-imagem');
+  img.src = p.imagem;
+  img.alt = p.titulo;
+  document.getElementById('tutorial-texto').innerHTML = p.texto; // texto fixo, escrito aqui mesmo
+  document.getElementById('tutorial-anterior').disabled = passoTutorial === 0;
+  document.getElementById('tutorial-proximo').textContent = ultimo ? 'Começar ✓' : 'Próximo ▶';
+  document.querySelectorAll('#tutorial-pontos button').forEach((b, k) => b.classList.toggle('ativo', k === passoTutorial));
+}
+
+function abrirTutorial3D() {
+  focoAntesTutorial = document.activeElement;
+  // pré-carrega as imagens pra troca de passo ser instantânea
+  PASSOS_TUTORIAL_3D.forEach(p => { new Image().src = p.imagem; });
+  document.getElementById('tutorial-3d').hidden = false;
+  mostrarPassoTutorial(0);
+  document.getElementById('tutorial-proximo').focus();
+}
+
+function fecharTutorial3D() {
+  document.getElementById('tutorial-3d').hidden = true;
+  try { localStorage.setItem(CHAVE_TUTORIAL_VISTO, '1'); } catch (_) {}
+  if (focoAntesTutorial && focoAntesTutorial.focus) focoAntesTutorial.focus();
+}
+
+(function montarTutorial3D() {
+  const pontos = document.getElementById('tutorial-pontos');
+  PASSOS_TUTORIAL_3D.forEach((p, k) => {
+    const b = document.createElement('button');
+    b.title = `Passo ${k + 1}: ${p.titulo}`;
+    b.setAttribute('aria-label', b.title);
+    b.addEventListener('click', () => mostrarPassoTutorial(k));
+    pontos.appendChild(b);
+  });
+  document.querySelectorAll('.btn-tutorial-3d').forEach(b => b.addEventListener('click', abrirTutorial3D));
+  document.getElementById('tutorial-fechar').addEventListener('click', fecharTutorial3D);
+  document.getElementById('tutorial-anterior').addEventListener('click', () => mostrarPassoTutorial(passoTutorial - 1));
+  document.getElementById('tutorial-proximo').addEventListener('click', () => {
+    if (passoTutorial === PASSOS_TUTORIAL_3D.length - 1) fecharTutorial3D(); else mostrarPassoTutorial(passoTutorial + 1);
+  });
+  // clique no fundo escuro (fora da caixa) fecha
+  document.getElementById('tutorial-3d').addEventListener('click', ev => { if (ev.target.id === 'tutorial-3d') fecharTutorial3D(); });
+  document.addEventListener('keydown', ev => {
+    if (document.getElementById('tutorial-3d').hidden) return;
+    if (ev.key === 'Escape') fecharTutorial3D();
+    else if (ev.key === 'ArrowRight') mostrarPassoTutorial(passoTutorial + 1);
+    else if (ev.key === 'ArrowLeft') mostrarPassoTutorial(passoTutorial - 1);
+    else return;
+    ev.preventDefault();
+  });
+
+  // primeira visita: abre sozinho depois que o mapa aparecer
+  let visto = false;
+  try { visto = localStorage.getItem(CHAVE_TUTORIAL_VISTO) === '1'; } catch (_) {}
+  if (!visto) setTimeout(abrirTutorial3D, 1500);
+})();
 document.getElementById('modo3d-cancelar').addEventListener('click', cancelarModo3D);
 
 document.getElementById('modo3d-entrar').addEventListener('click', () => {

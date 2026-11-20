@@ -78,6 +78,10 @@ Os dois fluxos (2D e 3D) compartilham o mesmo `<script>`, então nomes que exist
   - Trilha ao vivo acumulada desde que a aba foi aberta (sem limite de pontos — removido o limite artificial anterior).
 - Modo **Seguir**: câmera em chase-cam atrás/acima da aeronave; só reposiciona o `target` do OrbitControls a cada frame, preservando o zoom/ângulo que o usuário ajustar manualmente (zoom/pan não cancelam mais o seguir).
 
+### Tutorial
+- Modal `#tutorial-3d` com 7 passos (`PASSOS_TUTORIAL_3D`): abrir o modo 3D, escolher centro, raio, navegar, clicar na aeronave, Seguir/Trilha, Rótulos/Trilhas/Voltar. Abre sozinho **só na primeira visita ao site** (chave `tutorial3dVisto` no localStorage) e depois pelos botões ❓ (`.btn-tutorial-3d`, nas barras do 2D e do 3D). Esc / setas / clique fora funcionam.
+- As imagens (`tutorial/passo*.webp`, 960x600) são prints do próprio site gerados por `ferramentas/gerar_imagens_tutorial.js` (Chrome automatizado + destaque amarelo). **Se mudar a interface, rode o script de novo.** A foto do Planespotters fica fora dos prints de propósito (os termos proíbem salvar/re-hospedar).
+
 ### Bússola
 - Fita horizontal no topo (estilo HUD), mostra o rumo atual da câmera (N/NE/E/SE/S/SW/W/NW), atualizada a cada frame via `camera.getWorldDirection()`.
 
